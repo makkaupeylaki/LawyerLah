@@ -1,12 +1,22 @@
-name = "lawyerlah-api"
+name = "lawyerlah"
 main = "index.js"
 compatibility_date = "2026-10-01"
+
+# The static site in ../web is served by this same Worker (Workers static assets),
+# so the pages and /api/* share one origin.
+# The Worker runs first for the API and the HTML pages (to make canonical/OG URLs absolute);
+# other files (CSS, JS, images) are served straight from assets.
+[assets]
+directory = "../web"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/", "/index.html", "/about", "/about.html"]
 
 # Workers AI (used while PROVIDER = "cloudflare" in index.js)
 [ai]
 binding = "AI"
 
-# Per-visitor daily counters (keyed on a hash of the IP, never the IP itself).
+# Per-visitor daily counters (keyed on a hash of the IP, never the IP itself)
+# and the global daily AI cap counter.
 # Create with:  npx wrangler kv namespace create LIMITS   then paste the id below.
 [[kv_namespaces]]
 binding = "LIMITS"
@@ -17,3 +27,10 @@ id = "00000000000000000000000000000000"
 [[kv_namespaces]]
 binding = "FEEDBACK"
 id = "00000000000000000000000000000000"
+
+[vars]
+# Max model calls per day across all visitors (on top of 10 per visitor).
+GLOBAL_DAILY_CAP = "300"
+# Optional: absolute site URL for canonical/OG tags, e.g. "https://example.com".
+# Leave empty to use the origin the page was requested on.
+SITE_URL = ""

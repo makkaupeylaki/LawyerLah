@@ -1,8 +1,6 @@
 // lawyerlah frontend. Plain JS, no build step.
 
-// Where the Worker API lives. Empty = same origin (Worker routed at <domain>/api/*).
-// Set to the workers.dev URL if the Worker is on its own origin. On localhost it uses `wrangler dev`.
-const API_BASE = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "http://localhost:8787" : "";
+// The site and the API are served by the same Worker, so API calls are same-origin (/api/...).
 const MAX = 500;
 const TIMEOUT_MS = 30000;
 
@@ -74,6 +72,10 @@ function showAnswer(a) {
   } else {
     law.textContent = "Not covered";
   }
+  const demo = $("a-demo");
+  demo.hidden = !a.demo;
+  if (a.demo) $("a-demo-title").textContent = a.demoNotice || "DEMO DATA, not real law";
+
   $("a-plain").textContent = a.plain || "";
   $("a-unclear").textContent = a.unclear || "";
 
@@ -85,12 +87,47 @@ function showAnswer(a) {
     link.textContent = "Search sso.agc.gov.sg ↗";
   }
 
+  renderRoutes(Array.isArray(a.routes) ? a.routes : []);
+
   for (const b of answer.querySelectorAll("[data-vote]")) {
     b.disabled = false;
     b.setAttribute("aria-pressed", "false");
   }
   $("fb-thanks").hidden = true;
   show(answer);
+}
+
+function renderRoutes(routes) {
+  const list = $("a-routes");
+  list.textContent = "";
+  for (const r of routes) {
+    const li = document.createElement("li");
+    li.className = "route";
+    const name = document.createElement(/^https:\/\//.test(r.url || "") ? "a" : "span");
+    name.className = "route-name";
+    name.textContent = r.name || "";
+    if (name.tagName === "A") {
+      name.href = r.url;
+      name.target = "_blank";
+      name.rel = "noopener noreferrer";
+      name.textContent += " ↗";
+    }
+    li.append(name);
+    for (const [label, text] of [["", r.what], ["Who it's for: ", r.eligibility], ["Limits: ", r.limits]]) {
+      if (!text) continue;
+      const p = document.createElement("p");
+      if (label) {
+        const b = document.createElement("span");
+        b.className = "route-k";
+        b.textContent = label;
+        p.append(b);
+      }
+      p.append(text);
+      li.append(p);
+    }
+    list.append(li);
+  }
+  $("a-routes-block").hidden = routes.length === 0;
 }
 
 function setOffline() {
@@ -105,7 +142,7 @@ async function post(path, body) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(API_BASE + path, {
+    const res = await fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -136,6 +173,8 @@ async function ask(question) {
     const { status, ok, data } = await post("/api/ask", { question });
     if (ok && data && "plain" in data) {
       showAnswer(data);
+    } else if (status === 429 && data && data.error === "global_limit") {
+      showNotice("That's all for today", data.message || "LawyerLah has answered all the questions it can for today. Please come back tomorrow.", { warn: true });
     } else if (status === 429) {
       showNotice("Daily limit reached", (data && data.message) || "You've used your 10 questions for today. Come back tomorrow.", { warn: true });
     } else if (status === 400) {

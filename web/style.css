@@ -125,6 +125,24 @@ textarea:focus { border-color: var(--accent); outline: none; }
   background: var(--surface-2); color: var(--muted); font-size: 13px;
 }
 
+/* demo data banner: shown on every answer built on placeholder law text */
+.demo-banner {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: -4px 0 0; padding: 12px 14px; border-radius: 8px;
+  background: var(--warn-bg); border: 2px solid var(--warn); color: var(--warn); font-size: 14px;
+}
+.demo-banner strong { font-size: 16px; letter-spacing: 0.04em; text-transform: uppercase; }
+.demo-banner span { color: var(--text); }
+
+/* official routes */
+.routes-note { color: var(--muted); font-size: 14px; }
+.routes { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.route { padding: 12px; border-radius: 8px; background: var(--surface-2); font-size: 14px; }
+.route p { margin: 4px 0 0; color: var(--muted); }
+.route-name { font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; }
+a.route-name:hover { text-decoration: underline; }
+.route-k { color: var(--text); font-weight: 600; }
+
 .notice-title { margin: 0; font-size: 17px; }
 .notice-text { margin: 0; color: var(--muted); }
 .notice.warn .notice-title { color: var(--warn); }
