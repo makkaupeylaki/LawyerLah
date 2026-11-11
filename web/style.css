@@ -119,6 +119,10 @@ textarea:focus { border-color: var(--accent); outline: none; }
 .source p { margin: 0; }
 .source p + p { margin-top: 2px; }
 .source a { color: var(--muted); }
+.further { font-size: 13px; color: var(--muted); }
+.further p { margin: 0; }
+.further a { color: var(--text); }
+.further .further-note { color: var(--faint); font-size: 12px; margin-top: 2px; }
 
 .feedback {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
