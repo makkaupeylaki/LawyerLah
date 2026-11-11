@@ -109,8 +109,12 @@ textarea:focus { border-color: var(--accent); outline: none; }
 .label {
   margin: 0; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
 }
-.law { font-size: 19px; font-weight: 650; line-height: 1.3; }
-.law .sec { display: block; color: var(--accent); font-size: 16px; margin-top: 2px; }
+.short-answer { font-size: 18px; line-height: 1.5; }
+.depends { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.source { color: var(--faint); font-size: 12px; line-height: 1.5; }
+.source p { margin: 0; }
+.source p + p { margin-top: 2px; }
+.source a { color: var(--muted); }
 
 .feedback {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
