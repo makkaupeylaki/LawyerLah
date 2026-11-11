@@ -88,7 +88,8 @@ In `worker/index.js`:
   limit. To go back to Llama, set `MODEL` to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
 - DeepSeek models are called with `chat_template_kwargs: { thinking: false }`: with thinking on, the reasoning uses up
   `max_tokens` and the reply comes back empty. Replies are read from `choices[0].message.content` (OpenAI shape), with
-  `response` as a fallback for Llama. `max_tokens` is 200 for the keyword and selection steps and 900 for the answer.
+  `response` as a fallback for Llama. `max_tokens` is 200 for the keyword and selection steps and 1500 for the answer (`ANSWER_MAX_TOKENS`), enough for
+  the `powers` worksheet plus a 5-sentence answer with conditions.
 - **Failed calls.** Empty or null content counts as a failed call. On the Workers AI rate limit (error 3021,
   "inference request per min rate reached") a call (chat or embedding) is retried once after 1.5 seconds. A call that
   still fails takes the step's existing fallback: the keyword step falls back to the plain question, the selection
@@ -114,6 +115,7 @@ Per question:
    | --- | --- |
    | arrest, arrested, lawyer, counsel, detained | Constitution Art. 9, CPC s 68 |
    | police questioning, statement, silence, interview | CPC s 22, 23, 258, 261 |
+   | searching a person ("search me", "my bag", body search, arrested persons) | CPC s 78, first |
    | police search, warrant, search without warrant | CPC s 32, 34 |
    | hacking, unauthorised access, computer | CMA s 3 first, then s 4–9 |
    | bail | CPC s 92, 93, 95 |
@@ -168,6 +170,14 @@ The Act name, section, version date and link always come from KV, never from the
   power") to "any"/"all"/"everyone"/"at any time" with no condition word at all ("if", "only", "when", "where",
   "unless", "other than", "who", …). This catches the worst over-generalisations; it can't tell whether the stated
   conditions are the right ones, which depends on the model.
+- **No cut-off text.** Returned text is never cut mid-word: length limits (2,000 characters per field, 240 per
+  bullet) only drop whole sentences or bullets. If the model's reply ends mid-sentence (it stopped at `max_tokens`,
+  or the text doesn't end with ".", "!", "?" or a closing bracket), the dangling fragment is dropped and the complete
+  sentences before it are kept; a reply cut off mid-JSON is still read field by field, and a half-written bullet is
+  left out.
+- **Question first.** The sections used are ordered so the one that answers the question comes first (pinned
+  sections for the question's topic, in pin order, e.g. CPC s 78 for a personal search before powers to search
+  places), and the short answer's sentences follow that order.
 - **Fallback.** If nothing usable is left, the short answer names the rules found (section headings) and says the text
   provided does not state this in a form LawyerLah could check, with `figuresNote`.
 

@@ -21,7 +21,13 @@ put("cpc", "258", "Admissibility of accused's statements", "Where any person is 
 put("cpc", "261", "Inferences from accused's silence", "Where in any criminal proceedings evidence is given that the accused, on being charged, failed to mention any fact, the court may draw such inferences as appear proper.");
 put("cpc", "32", "Search by police officer", "A police officer may search any place where he has reason to believe that a thing necessary for an investigation may be found.");
 put("cpc", "34", "Search without warrant for arrestable offences", "(1) A police officer investigating an arrestable offence may, without a warrant, search any place where he has reason to believe that a thing necessary for the investigation may be found ...");
-put("cpc", "78", "Search of arrested persons", "(1) Whenever a person is arrested by a police officer under a warrant which does not provide for the taking of bail, or without a warrant, and the person arrested cannot legally be admitted to bail or is unable to furnish bail, the officer may search that person and place in safe custody all articles, other than necessary wearing apparel, found upon him. (1A) Where a person is arrested and released on bail, a police officer may search that person only for a thing that may be used as evidence of the offence or for a weapon.");
+// CPC s78. (1) follows the published wording in substance. (1A) is a PARAPHRASE of the real subsection (articles the
+// person could use to cause harm, on arrest or on handover from a private person under s66), written from the 2024
+// amending Bill: the verbatim KV text (law:cpc:78) could not be read from this environment. Paste it in to replace.
+put("cpc", "78", "Search of arrested persons", "(1) Whenever a person is arrested by a police officer under a warrant which does not provide for the taking of bail, or without a warrant, and the person arrested cannot legally be admitted to bail or is unable to furnish bail, the officer may search that person and place in safe custody all articles, other than necessary wearing apparel, found upon him. (1A) Where a police officer arrests a person, or a person arrested by a private person is handed over to a police officer under section 66, the police officer may search that person and place in safe custody any article found on that person which the person could use to cause harm to himself or herself or to any other person.");
+// STAND-IN for a secondary place-search power (not the real s33 text): used only to test that the personal-search
+// provision is answered first.
+put("cpc", "33", "Search of place (stand-in)", "A police officer may enter and search a place where a person to be arrested has entered, if the officer has reason to believe the person is inside.");
 put("cpc", "92", "Bailable offences", "When any person accused of a bailable offence is arrested ... he shall be released on bail.");
 put("cma", "3", "Unauthorised access to computer material", "(1) Any person who knowingly causes a computer to perform any function for the purpose of securing access without authority to any program or data held in any computer shall be guilty of an offence and shall be liable on conviction to a fine not exceeding $5,000 or to imprisonment for a term not exceeding 2 years or to both and, in the case of a second or subsequent conviction, to a fine not exceeding $10,000 or to imprisonment for a term not exceeding 3 years or to both.");
 put("cma", "4", "Access with intent to commit or facilitate commission of offence", "(1) Any person who causes a computer to perform any function for the purpose of securing access to any program or data held in any computer with intent to commit an offence ... shall be liable on conviction to a fine not exceeding $50,000 or to imprisonment for a term not exceeding 10 years or to both.");
@@ -40,7 +46,7 @@ const VECTORIZE = { calls: [], query: async (v, o) => { VECTORIZE.calls.push({ t
   return { matches: [hit("law:wc:64E", 0.82), hit("law:pc:1", 0.8), hit("law:rtsn:2", 0.7), hit("law:cpc:92", 0.5), ...(VECTORIZE.extra || []).map((k) => hit(k, 0.75))] }; } };
 
 // Workers AI chat replies in the OpenAI shape (DeepSeek); t.shape = "llama" returns the old { response } shape.
-const openai = (content) => ({ id: "chatcmpl-test", object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: {} });
+const openai = (content, finish = "stop") => ({ id: "chatcmpl-test", object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: finish }], usage: {} });
 // t.fail = { keywords|select|answer|embed: { kind: "rate" | "empty" | "error", times } } injects failures;
 // t.failModel = "<model id>" makes every call to that model throw a non-rate-limit error.
 function makeAI(t) {
@@ -67,6 +73,8 @@ function makeAI(t) {
       return reply(JSON.stringify({ ids: t.ideal.filter((id) => ai.candidateIds.includes(id)) }));
     }
     ai.calls.push("answer"); ai.answerPrompt = user;
+    // t.answerRaw: the reply text as-is (e.g. cut off mid-JSON); t.finish: its finish_reason ("length" when cut).
+    if (t.answerRaw != null) return t.shape === "llama" ? { response: t.answerRaw } : openai(t.answerRaw, t.finish || "stop");
     return reply(JSON.stringify(t.answer));
   } };
   return ai;
@@ -190,7 +198,7 @@ const fresh = (extra) => ({ ...JSON.parse(JSON.stringify(POLICE)), ...extra });
   const chats = AI.runs.filter((r) => r.step !== "embed");
   expect("all 3 chat calls use deepseek-v4.1-flash-1017", chats.length === 3 && chats.every((r) => r.model === "@cf/deepseek-ai/deepseek-v4.1-flash-1017"), chats.map((r) => r.model).join(", "));
   expect("every chat call sends chat_template_kwargs { thinking: false }", chats.every((r) => r.params.chat_template_kwargs && r.params.chat_template_kwargs.thinking === false));
-  expect("max_tokens unchanged (200, 200, 900)", chats.map((r) => r.params.max_tokens).join(",") === "200,200,900", chats.map((r) => r.params.max_tokens).join(","));
+  expect("max_tokens 200, 200, 1500 (answer step raised so long answers aren't cut)", chats.map((r) => r.params.max_tokens).join(",") === "200,200,1500", chats.map((r) => r.params.max_tokens).join(","));
   expect("embedding still bge-base-en-v1.5, no thinking flag", AI.runs.some((r) => r.step === "embed" && r.model === "@cf/baai/bge-base-en-v1.5" && !r.params.chat_template_kwargs));
   expect("answer read from choices[0].message.content", status === 200 && /arrestable offence/.test(a.shortAnswer), a.shortAnswer);
 }
@@ -206,7 +214,7 @@ const fresh = (extra) => ({ ...JSON.parse(JSON.stringify(POLICE)), ...extra });
   r = await run(fresh({ fail: { select: { kind: "empty", times: 1 } } }));
   const given = [...r.AI.answerPrompt.matchAll(/<section id="([^"]+)"/g)].map((m) => m[1]);
   expect("empty selection reply -> first candidates (pinned first) used, still answered",
-    r.status === 200 && given[0] === "law:cpc:32" && given[1] === "law:cpc:34" && given.length <= 6 && /arrestable/.test(r.a.shortAnswer), given.join(" "));
+    r.status === 200 && given[0] === "law:cpc:78" && given[1] === "law:cpc:32" && given[2] === "law:cpc:34" && given.length <= 6 && /arrestable/.test(r.a.shortAnswer), given.join(" "));
   r = await run(fresh({ fail: { answer: { kind: "empty", times: 1 } } }));
   expect("empty answer reply -> 502, visitor's question not counted", r.status === 502 && r.a.error === "model" && !r.visitorCounted, JSON.stringify(r.a));
 }
@@ -235,22 +243,28 @@ const fresh = (extra) => ({ ...JSON.parse(JSON.stringify(POLICE)), ...extra });
 // ---------------------------------------------------------------- conditions (live failure: CPC s78 over-generalised)
 const SEARCH = (answer) => ({ q: "Can police search me without a warrant?", kw: { keywords: ["search without warrant", "search of arrested persons"], codes: ["cpc"] },
   ideal: ["law:cpc:34", "law:cpc:78"], extraHits: ["law:cpc:78"], answer });
+const S78_1 = "If a person is arrested and cannot be admitted to bail or cannot furnish bail, the officer may search them and place in safe custody the articles found on them, other than necessary wearing apparel [[law:cpc:78]].";
+const S78_1A = "When a police officer arrests a person, or receives an arrested person from a private person, the officer may also search that person and take into safe custody any article found on them that they could use to cause harm to themselves or anyone else [[law:cpc:78]].";
+const S34 = "Separately, a police officer investigating an arrestable offence may search a place without a warrant only if they have reason to believe something needed for the investigation is there [[law:cpc:34]].";
+const plain = (x) => x.replace(/\s*\[\[[^\]]*\]\]/g, "");
 {
-  console.log("15. Police search without a warrant: conditions stated, not generalised");
-  const { a, AI, status } = await run(SEARCH({ ids: ["law:cpc:34", "law:cpc:78"],
-    powers: [{ provision: "34(1)", power: "search a place without a warrant", conditions: "investigating an arrestable offence and reason to believe a thing needed is there" },
-             { provision: "78(1)", power: "search an arrested person and keep articles", conditions: "arrested and cannot be admitted to or furnish bail; not necessary clothing" },
-             { provision: "78(1A)", power: "search a person released on bail", conditions: "only for evidence of the offence or a weapon" }],
-    shortAnswer: "A police officer investigating an arrestable offence may search a place without a warrant only if they have reason to believe something needed for the investigation is there [[law:cpc:34]]. If a person is arrested and cannot be released on bail or cannot furnish bail, an officer may search them and keep in safe custody the articles found on them, other than necessary clothing [[law:cpc:78]]. If the person is released on bail, the officer may search them only for evidence of the offence or for a weapon [[law:cpc:78]].",
-    howItApplies: "The rule on searches without a warrant covers a police search during an investigation into an arrestable offence.",
-    depends: ["Whether the offence being investigated is arrestable.", "Whether the person was arrested and released on bail."] }));
+  console.log("15. Police search without a warrant: conditions stated, s78 first, s78(1A) as the real text says");
+  const { a, status } = await run(SEARCH({ ids: ["law:cpc:78", "law:cpc:34"],
+    powers: [{ provision: "78(1)", power: "search an arrested person and keep articles", conditions: "arrested and cannot be admitted to or furnish bail; not necessary wearing apparel" },
+             { provision: "78(1A)", power: "search and keep articles that could cause harm", conditions: "on arrest, or on handover from a private person" },
+             { provision: "34(1)", power: "search a place without a warrant", conditions: "investigating an arrestable offence and reason to believe a thing needed is there" }],
+    shortAnswer: `${S78_1} ${S78_1A} ${S34}`,
+    howItApplies: "The rules on searching an arrested person and on searches without a warrant cover a police search.",
+    depends: ["Whether the person was arrested.", "Whether they can be admitted to bail.", "Whether the offence being investigated is arrestable."] }));
   expect("status 200", status === 200, JSON.stringify(a).slice(0, 200));
-  expect("s34 described as applying to an arrestable offence", /arrestable offence/.test(a.shortAnswer), a.shortAnswer);
-  expect("s34's conditions stated (only if ... reason to believe)", /only if they have reason to believe/.test(a.shortAnswer));
-  expect("s78(1) and s78(1A) kept apart, each with its condition", /cannot be released on bail/.test(a.shortAnswer) && /released on bail, the officer may search them only for evidence/.test(a.shortAnswer));
+  expect("personal search (s78) answered first", a.shortAnswer.startsWith("If a person is arrested and cannot be admitted to bail"), a.shortAnswer);
+  expect("s78(1) with its bail condition and the wearing-apparel exception", /cannot be admitted to bail or cannot furnish bail/.test(a.shortAnswer) && /other than necessary wearing apparel/.test(a.shortAnswer));
+  expect("s78(1A) as the real text: articles that could cause harm, on arrest or handover", /could use to cause harm/.test(a.shortAnswer) && /from a private person/.test(a.shortAnswer));
+  expect("no claim that (1A) is about people released on bail", !/released on bail/.test(a.shortAnswer));
+  expect("s34 applies to an arrestable offence, with its condition", /arrestable offence may search a place without a warrant only if they have reason to believe/.test(a.shortAnswer));
   expect("never says any arrested person's belongings are all kept without condition", !/any (arrested )?person/i.test(a.shortAnswer) && !/keep (in safe custody )?all/i.test(a.shortAnswer));
-  expect("no vague 'in the stated situations' wording", !/stated situations|certain cases|under conditions/i.test(a.shortAnswer + a.howItApplies));
-  expect("sources are s34 then s78", src(a) === "Criminal section 34, Criminal section 78", src(a));
+  expect("every complete sentence kept (3 of 3)", [S78_1, S78_1A, S34].every((x) => a.shortAnswer.includes(plain(x).slice(0, -1))), a.shortAnswer);
+  expect("sources are s78 then s34", src(a) === "Criminal section 78, Criminal section 34", src(a));
   expect("'powers' worksheet not shown to the user", !("powers" in a));
 }
 {
@@ -280,6 +294,65 @@ const SEARCH = (answer) => ({ q: "Can police search me without a warrant?", kw: 
   expect("vague-phrase rule", /in the stated situations/.test(sys) && /Either say what the conditions are, or leave the sentence out/.test(sys));
   expect("self-check before replying", /check every sentence of "shortAnswer" and "howItApplies" against the section text/.test(sys));
   expect("'powers' worksheet in the reply shape", /"powers": \[/.test(sys));
+}
+// ---------------------------------------------------------------- truncation (live bug: answers hard-cut at 900 chars)
+{
+  console.log("19. Long answer over 900 characters comes back whole");
+  const S34b = "That place search also covers anything found there that the officer has reason to believe is needed for the investigation of the arrestable offence, and it does not depend on anyone having been arrested first [[law:cpc:34]].";
+  const S78c = "The safe-custody power for articles that could be used to cause harm applies whether the officer made the arrest or received the arrested person from a private person, and it is separate from the bail-related power to keep other articles [[law:cpc:78]].";
+  const long = `${S78_1} ${S78_1A} ${S78c} ${S34} ${S34b}`;
+  const { a } = await run(SEARCH({ ids: ["law:cpc:78", "law:cpc:34"], shortAnswer: long, howItApplies: "The rules on searching a person and searching a place cover this.", depends: [] }));
+  const expected = [S78_1, S78_1A, S78c, S34, S34b].map(plain);
+  expect("answer is longer than 900 characters", a.shortAnswer.length > 900, `${a.shortAnswer.length} chars`);
+  expect("all 5 sentences present, none cut", expected.every((x) => a.shortAnswer.includes(x.slice(0, -1))), a.shortAnswer.slice(-120));
+  expect("ends on a complete sentence", /[.)]$/.test(a.shortAnswer));
+}
+{
+  console.log("20. Reply cut off mid-word (finish_reason length): only the dangling fragment is dropped");
+  const raw = '{"ids":["law:cma:3","law:cma:4"],"powers":[{"provision":"3(1)","power":"offence","conditions":"knowingly, without authority"}],' +
+    '"shortAnswer":"Knowingly getting a computer to give access to data without authority is an offence with a fine of up to $5,000 or up to 2 years in jail, or both [[law:cma:3]]. ' +
+    'Doing it with intent to commit another offence carries a fine of up to $50,000 or up to 10 years in jail, or b';
+  const { a, status } = await run({ q: "Someone hacked into my email account", kw: { keywords: ["unauthorised access"], codes: ["cma"] }, ideal: ["law:cma:3", "law:cma:4"], answerRaw: raw, finish: "length" });
+  expect("still answered (200), not a model error", status === 200, JSON.stringify(a).slice(0, 160));
+  expect("complete first sentence kept", /\$5,000 or up to 2 years in jail, or both/.test(a.shortAnswer), a.shortAnswer);
+  expect("dangling 'or b' fragment dropped", !/or b\b/.test(a.shortAnswer) && !/10 years/.test(a.shortAnswer), a.shortAnswer);
+  expect("cut-off fields fall back to defaults", /depends on the full facts/.test(a.howItApplies) && a.depends.length === 1, JSON.stringify([a.howItApplies, a.depends]));
+}
+{
+  console.log("21. Reply ending without a full stop (not flagged as cut): fragment dropped, rest kept");
+  const { a } = await run(SEARCH({ ids: ["law:cpc:78"], shortAnswer: `${plain(S78_1)} ${plain(S78_1A)} The officer may also take any article used by a pers`,
+    howItApplies: "The rule on searching an arrested person covers this. It also covers questions tending t", depends: ["Whether the person was arrested."] }));
+  expect("both complete s78 sentences kept", a.shortAnswer.includes(plain(S78_1).slice(0, -1)) && a.shortAnswer.includes(plain(S78_1A).slice(0, -1)), a.shortAnswer);
+  expect("'used by a pers' fragment dropped", !/used by a pers/.test(a.shortAnswer));
+  expect("'questions tending t' dropped from how-it-applies, complete sentence kept", a.howItApplies === "The rule on searching an arrested person covers this.", a.howItApplies);
+  expect("bullet kept whole", a.depends[0] === "Whether the person was arrested.");
+}
+{
+  console.log("22. Cut inside the bullets: complete bullets kept, the half bullet left out");
+  const raw = '{"ids":["law:cma:3"],"shortAnswer":"Knowingly getting a computer to give access to data without authority is an offence with a fine of up to $5,000 or up to 2 years in jail, or both.",' +
+    '"howItApplies":"The rule on unauthorised access covers someone getting into an account without permission.","depends":["Whether the access was knowing.","Whether it was meant to commit another off';
+  const { a } = await run({ q: "Someone hacked into my email account", kw: { keywords: ["unauthorised access"], codes: ["cma"] }, ideal: ["law:cma:3"], answerRaw: raw, finish: "length" });
+  expect("short answer and how-it-applies whole", /or both\.$/.test(a.shortAnswer) && /without permission\.$/.test(a.howItApplies), a.shortAnswer);
+  expect("only the complete bullet kept", a.depends.length === 1 && a.depends[0] === "Whether the access was knowing.", JSON.stringify(a.depends));
+}
+{
+  console.log("23. Hacking stand-in: every complete sentence kept");
+  const H1 = "Knowingly getting a computer to give access to any program or data without authority is an offence with a fine of up to $5,000 or up to 2 years in jail, or both [[law:cma:3]].";
+  const H2 = "For a second or later conviction, the penalty is a fine of up to $10,000 or up to 3 years in jail, or both [[law:cma:3]].";
+  const H3 = "Doing it with intent to commit another offence carries a fine of up to $50,000 or up to 10 years in jail, or both [[law:cma:4]].";
+  const { a } = await run({ q: "Someone hacked into my email account", kw: { keywords: ["unauthorised access"], codes: ["cma"] }, ideal: ["law:cma:3", "law:cma:4"],
+    answer: { ids: ["law:cma:3", "law:cma:4"], shortAnswer: `${H1} ${H2} ${H3}`, howItApplies: "The rule on unauthorised access covers this.", depends: ["Whether it was knowing."] } });
+  expect("all 3 sentences kept", [H1, H2, H3].every((x) => a.shortAnswer.includes(plain(x).slice(0, -1))), a.shortAnswer);
+  expect("basic offence (section 3) first", a.shortAnswer.startsWith("Knowingly getting a computer"), a.shortAnswer.slice(0, 60));
+}
+{
+  console.log("24. Personal search answered before a secondary place-search power");
+  const S33 = "A police officer may also enter and search a place a person to be arrested has entered, if they have reason to believe the person is inside [[law:cpc:33]].";
+  const { a } = await run({ ...SEARCH({ ids: ["law:cpc:33", "law:cpc:78"], shortAnswer: `${S33} ${S78_1} ${S78_1A}`, howItApplies: "The rule on searching an arrested person covers this.", depends: [] }),
+    ideal: ["law:cpc:33", "law:cpc:78"], extraHits: ["law:cpc:78", "law:cpc:33"] });
+  expect("s78 sentences come first although the model put s33 first", a.shortAnswer.startsWith("If a person is arrested and cannot be admitted to bail"), a.shortAnswer.slice(0, 80));
+  expect("s33 sentence kept, after s78", a.shortAnswer.indexOf("enter and search a place") > a.shortAnswer.indexOf("cause harm"));
+  expect("footnote lists s78 first", src(a).startsWith("Criminal section 78"), src(a));
 }
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 if (fails) process.exitCode = 1;
