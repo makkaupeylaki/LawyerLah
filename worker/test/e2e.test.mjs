@@ -38,20 +38,35 @@ const hit = (key, score) => ({ id: key + ":p1", score, metadata: { kv_key: key, 
 const VECTORIZE = { calls: [], query: async (v, o) => { VECTORIZE.calls.push({ topK: o.topK, filter: o.filter ? o.filter.code.$in.join(",") : null });
   return { matches: [hit("law:wc:64E", 0.82), hit("law:pc:1", 0.8), hit("law:rtsn:2", 0.7), hit("law:cpc:92", 0.5)] }; } };
 
+// Workers AI chat replies in the OpenAI shape (DeepSeek); t.shape = "llama" returns the old { response } shape.
+const openai = (content) => ({ id: "chatcmpl-test", object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: {} });
+// t.fail = { keywords|select|answer|embed: { kind: "rate" | "empty" | "error", times } } injects failures;
+// t.failModel = "<model id>" makes every call to that model throw a non-rate-limit error.
 function makeAI(t) {
-  const ai = { calls: [], run: async (model, o) => {
-    if (o.text) return { data: [new Array(768).fill(0.01)] };
-    const sys = o.messages[0].content, user = o.messages[1].content;
-    if (sys.startsWith("You turn")) { ai.calls.push("keywords"); return { response: JSON.stringify(t.kw) }; }
-    if (sys.startsWith("You choose")) {
+  const ai = { calls: [], runs: [], run: async (model, o) => {
+    const step = o.text ? "embed" : o.messages[0].content.startsWith("You turn") ? "keywords" : o.messages[0].content.startsWith("You choose") ? "select" : "answer";
+    ai.runs.push({ step, model, params: o, at: Date.now() });
+    const f = t.fail && t.fail[step];
+    if (f && f.times > 0) {
+      f.times--;
+      if (f.kind === "rate") throw new Error("3021: inference request per min rate reached");
+      if (f.kind === "error") throw new Error("5000: internal error");
+      if (f.kind === "empty") return step === "embed" ? { data: [] } : openai(null);
+    }
+    if (t.failModel && model === t.failModel) throw new Error("5007: No such model");
+    if (step === "embed") return { data: [new Array(768).fill(0.01)] };
+    const reply = (content) => (t.shape === "llama" ? { response: content } : openai(content));
+    const user = o.messages[1].content;
+    if (step === "keywords") { ai.calls.push("keywords"); return reply(JSON.stringify(t.kw)); }
+    if (step === "select") {
       ai.calls.push("select"); ai.selectPrompt = user;
       ai.candidateIds = [...user.matchAll(/<candidate id="([^"]+)"/g)].map((m) => m[1]);
       ai.previewMax = Math.max(...[...user.matchAll(/">([^<]*)<\/candidate>/g)].map((m) => m[1].length));
-      if (t.selectRaw) return { response: t.selectRaw };
-      return { response: JSON.stringify({ ids: t.ideal.filter((id) => ai.candidateIds.includes(id)) }) };
+      if (t.selectRaw) return reply(t.selectRaw);
+      return reply(JSON.stringify({ ids: t.ideal.filter((id) => ai.candidateIds.includes(id)) }));
     }
     ai.calls.push("answer"); ai.answerPrompt = user;
-    return { response: JSON.stringify(t.answer) };
+    return reply(JSON.stringify(t.answer));
   } };
   return ai;
 }
@@ -60,7 +75,7 @@ async function run(t) {
   const AI = makeAI(t); const LAWS = kv(L);
   const env = { AI, VECTORIZE, LAWS, LIMITS: kv(), FEEDBACK: kv() };
   const r = await w.fetch(new Request("https://x/api/ask", { method: "POST", headers: { "cf-connecting-ip": Math.random() + "" }, body: JSON.stringify({ question: t.q }) }), env);
-  return { a: await r.json(), AI, status: r.status, lawsReads: LAWS.gets() };
+  return { a: await r.json(), AI, status: r.status, lawsReads: LAWS.gets(), visitorCounted: [...env.LIMITS.m.keys()].some((k) => k.startsWith("ask:")) };
 }
 let fails = 0;
 const expect = (name, cond, detail = "") => { console.log(`  ${cond ? "PASS" : "FAIL"} ${name}${detail ? "  — " + detail : ""}`); if (!cond) fails++; };
@@ -163,6 +178,58 @@ for (const t of T) {
   const { a } = await run(t);
   expect("sentence tagged to an unused section dropped", !/Repeat offenders/.test(a.shortAnswer), a.shortAnswer);
   expect("verified sentence kept", /\$50,000/.test(a.shortAnswer), a.shortAnswer);
+}
+// ---------------------------------------------------------------- model switch: DeepSeek on Workers AI
+const POLICE = { q: "Can police search me without a warrant?", kw: { keywords: ["search without warrant"], codes: ["cpc"] }, ideal: ["law:cpc:34"],
+  answer: { ids: ["law:cpc:34"], shortAnswer: "A police officer investigating an arrestable offence may search a place without a warrant if they have reason to believe something needed for the investigation is there.", howItApplies: "The rule covers a police search.", depends: ["Whether the offence is arrestable."] } };
+const fresh = (extra) => ({ ...JSON.parse(JSON.stringify(POLICE)), ...extra });
+{
+  console.log("10. DeepSeek model, thinking off, OpenAI reply shape");
+  const { a, AI, status } = await run(fresh({}));
+  const chats = AI.runs.filter((r) => r.step !== "embed");
+  expect("all 3 chat calls use deepseek-v4.1-flash-1017", chats.length === 3 && chats.every((r) => r.model === "@cf/deepseek-ai/deepseek-v4.1-flash-1017"), chats.map((r) => r.model).join(", "));
+  expect("every chat call sends chat_template_kwargs { thinking: false }", chats.every((r) => r.params.chat_template_kwargs && r.params.chat_template_kwargs.thinking === false));
+  expect("max_tokens unchanged (200, 200, 900)", chats.map((r) => r.params.max_tokens).join(",") === "200,200,900", chats.map((r) => r.params.max_tokens).join(","));
+  expect("embedding still bge-base-en-v1.5, no thinking flag", AI.runs.some((r) => r.step === "embed" && r.model === "@cf/baai/bge-base-en-v1.5" && !r.params.chat_template_kwargs));
+  expect("answer read from choices[0].message.content", status === 200 && /arrestable offence/.test(a.shortAnswer), a.shortAnswer);
+}
+{
+  console.log("11. Llama reply shape (out.response) still read");
+  const { a, status } = await run(fresh({ shape: "llama" }));
+  expect("answer read from out.response", status === 200 && /arrestable offence/.test(a.shortAnswer));
+}
+{
+  console.log("12. Empty or null content = failed call, existing fallbacks");
+  let r = await run(fresh({ fail: { keywords: { kind: "empty", times: 1 } } }));
+  expect("empty keyword reply -> plain question still answered", r.status === 200 && /arrestable/.test(r.a.shortAnswer));
+  r = await run(fresh({ fail: { select: { kind: "empty", times: 1 } } }));
+  const given = [...r.AI.answerPrompt.matchAll(/<section id="([^"]+)"/g)].map((m) => m[1]);
+  expect("empty selection reply -> first candidates (pinned first) used, still answered",
+    r.status === 200 && given[0] === "law:cpc:32" && given[1] === "law:cpc:34" && given.length <= 6 && /arrestable/.test(r.a.shortAnswer), given.join(" "));
+  r = await run(fresh({ fail: { answer: { kind: "empty", times: 1 } } }));
+  expect("empty answer reply -> 502, visitor's question not counted", r.status === 502 && r.a.error === "model" && !r.visitorCounted, JSON.stringify(r.a));
+}
+{
+  console.log("13. Rate limit (3021): one retry after ~1.5 s");
+  let r = await run(fresh({ fail: { answer: { kind: "rate", times: 1 } } }));
+  const ans = r.AI.runs.filter((x) => x.step === "answer");
+  const waited = ans.length === 2 ? ans[1].at - ans[0].at : 0;
+  expect("rate-limited answer retried once and answered", r.status === 200 && ans.length === 2 && /arrestable/.test(r.a.shortAnswer), `${ans.length} calls`);
+  expect("retry waited about 1.5 s", waited >= 1400 && waited < 3000, `${waited} ms`);
+  expect("retry used the same model, not the fallback", ans.every((x) => x.model === "@cf/deepseek-ai/deepseek-v4.1-flash-1017"));
+  r = await run(fresh({ fail: { answer: { kind: "rate", times: 2 } } }));
+  expect("rate-limited twice -> 502, visitor's question not counted", r.status === 502 && !r.visitorCounted && r.AI.runs.filter((x) => x.step === "answer").length === 2);
+  r = await run(fresh({ fail: { embed: { kind: "rate", times: 1 } } }));
+  expect("rate-limited embedding retried once and answered", r.status === 200 && r.AI.runs.filter((x) => x.step === "embed").length === 2);
+  r = await run(fresh({ fail: { keywords: { kind: "rate", times: 2 } } }));
+  expect("keyword step rate-limited twice -> plain question, still answered", r.status === 200 && /arrestable/.test(r.a.shortAnswer));
+}
+{
+  console.log("14. Fallback model on other errors");
+  const r = await run(fresh({ failModel: "@cf/deepseek-ai/deepseek-v4.1-flash-1017" }));
+  const chats = r.AI.runs.filter((x) => x.step !== "embed");
+  expect("each step tries v4-flash-0731 after the primary fails", chats.filter((x) => x.model === "@cf/deepseek-ai/deepseek-v4-flash-0731").length === 3, chats.map((x) => x.model.split("/").pop()).join(", "));
+  expect("still answered", r.status === 200 && /arrestable/.test(r.a.shortAnswer));
 }
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 if (fails) process.exitCode = 1;
