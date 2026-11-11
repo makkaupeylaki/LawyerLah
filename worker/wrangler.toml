@@ -15,10 +15,12 @@ run_worker_first = ["/api/*", "/", "/index.html", "/about", "/about.html"]
 [ai]
 binding = "AI"
 
-# Law entries: one key "laws" (JSON array / data/laws.json shape) or one key per entry.
-# Laws are changed by writing to this namespace (see README), not by redeploying.
-# If it is empty, the Worker falls back to data/laws.json.
-# Create with:  npx wrangler kv namespace create LAWS   then paste the id below.
+# Vector index of the Acts (768 dims, cosine, metadata index on "code"). Already loaded; the Worker only reads it.
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "lawyerlah-laws"
+
+# Full section text: law:{code}:{section}, act:{code}, acts:index. Already loaded; the Worker only reads it.
 [[kv_namespaces]]
 binding = "LAWS"
 id = "00000000000000000000000000000000"

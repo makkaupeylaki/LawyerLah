@@ -79,6 +79,7 @@ function showAnswer(a) {
   }
 
   renderSources(Array.isArray(a.sources) ? a.sources : []);
+  renderFurtherReading(a.furtherReading);
 
   renderRoutes(Array.isArray(a.routes) ? a.routes : []);
 
@@ -110,14 +111,41 @@ function renderSources(sources) {
   }
   for (const s of sources) {
     const p = document.createElement("p");
-    p.append(`Source: ${s.act}, section ${s.section}${s.title ? ` (${s.title})` : ""} · `);
-    if (s.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(s.sourceUrl)) {
+    const heading = s.heading || s.title;
+    p.append(`Source: ${s.act}, section ${s.section}${heading ? ` (${heading})` : ""}`);
+    if (s.inForceFrom) p.append(` · version in force from ${s.inForceFrom}`);
+    p.append(" · ");
+    if (s.note) {
+      // "Unofficial consolidation from SSO, check sso.agc.gov.sg for the official text": the domain is the link.
+      const [before, after] = s.note.split("sso.agc.gov.sg");
+      const url = s.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(s.sourceUrl) ? s.sourceUrl : "https://sso.agc.gov.sg/";
+      p.append(before, link(url, "sso.agc.gov.sg ↗"), after || "");
+    } else if (s.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(s.sourceUrl)) {
       p.append(link(s.sourceUrl, "sso.agc.gov.sg ↗"));
     } else {
       p.append("no link (demo data)");
     }
     box.append(p);
   }
+}
+
+// Further reading: a third-party article, link only, labelled as such.
+function renderFurtherReading(fr) {
+  const box = $("a-further");
+  box.textContent = "";
+  box.hidden = !(fr && /^https:\/\//.test(fr.url || ""));
+  if (box.hidden) return;
+  const a = document.createElement("a");
+  a.href = fr.url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer nofollow";
+  a.textContent = `${fr.label} ↗`;
+  const p = document.createElement("p");
+  p.append("Further reading: ", a);
+  const note = document.createElement("p");
+  note.className = "further-note";
+  note.textContent = fr.note || "Third-party law firm article.";
+  box.append(p, note);
 }
 
 function renderRoutes(routes) {
