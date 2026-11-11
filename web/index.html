@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>lawyerlah · Your kaki for Singapore law basics</title>
+  <meta name="description" content="Describe an everyday situation in Singapore (tenancy, employment, traffic) and see which Act and section seems relevant, in plain English. Not legal advice.">
+  <meta name="theme-color" content="#0b0c0e">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0c0e'/%3E%3Cg transform='translate(2.4 2.6) scale(.85)'%3E%3Cpath fill='%23ff5a64' d='M16.74 2.78A3.3 3.3 0 1 0 18.84 7.69A2.7 2.7 0 1 1 16.74 2.78Z'/%3E%3Cpath fill='none' stroke='%23ff5a64' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M16 11v15M10.5 26.5h11M5.5 12h21M7 12 4 19M7 12l3 7M25 12l-3 7M25 12l3 7'/%3E%3Cpath fill='%23ff5a64' d='M3 19h8a4 4 0 0 1-8 0zM21 19h8a4 4 0 0 1-8 0z'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="canonical" href="https://lawyerlah.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="lawyerlah">
+  <meta property="og:title" content="lawyerlah · Your kaki for Singapore law basics">
+  <meta property="og:description" content="Describe an everyday situation and see which Singapore Act and section seems relevant, in plain English. Not legal advice.">
+  <meta property="og:url" content="https://lawyerlah.com/">
+  <meta property="og:image" content="https://lawyerlah.com/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="lawyerlah logo: scales with a crescent. Your kaki for Singapore law basics.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="lawyerlah · Your kaki for Singapore law basics">
+  <meta name="twitter:description" content="Describe an everyday situation and see which Singapore Act and section seems relevant, in plain English. Not legal advice.">
+  <meta name="twitter:image" content="https://lawyerlah.com/og.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" aria-label="lawyerlah home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path fill="currentColor" d="M16.74 2.78A3.3 3.3 0 1 0 18.84 7.69A2.7 2.7 0 1 1 16.74 2.78Z"/>
+        <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M16 11v15M10.5 26.5h11M5.5 12h21M7 12 4 19M7 12l3 7M25 12l-3 7M25 12l3 7"/>
+        <path fill="currentColor" d="M3 19h8a4 4 0 0 1-8 0zM21 19h8a4 4 0 0 1-8 0z"/>
+      </svg>
+      <span class="brand-text">
+        <span class="wordmark">lawyer<span class="accent">lah</span></span>
+        <span class="tagline">Your kaki for Singapore law basics</span>
+      </span>
+    </a>
+    <a class="top-link" href="/about">About</a>
+  </header>
+
+  <main>
+    <div id="offline" class="banner" role="status" hidden>You're offline. Questions will work again when you reconnect.</div>
+
+    <form id="ask" class="ask" novalidate>
+      <label for="q" class="ask-label">Describe your situation</label>
+      <textarea id="q" name="question" rows="4" maxlength="500" placeholder="e.g. My landlord wants me to pay for repainting the whole flat when I move out" required></textarea>
+      <div class="ask-row">
+        <span id="count" class="count" aria-live="polite">0 / 500</span>
+        <button id="submit" class="btn btn-primary" type="submit">Ask</button>
+      </div>
+      <p id="ask-error" class="field-error" role="alert" hidden></p>
+      <div class="chips" aria-label="Examples">
+        <button type="button" class="chip">My landlord is keeping my whole deposit for small marks on the wall</button>
+        <button type="button" class="chip">My boss makes me work overtime every day without extra pay</button>
+        <button type="button" class="chip">I was caught driving 20 km/h over the speed limit</button>
+      </div>
+    </form>
+
+    <section id="result" class="result" aria-live="polite">
+      <div id="loading" class="card loading" hidden>
+        <p class="loading-text"><span class="spinner" aria-hidden="true"></span>Looking through the Acts…</p>
+        <div class="skeleton w60"></div>
+        <div class="skeleton"></div>
+        <div class="skeleton w80"></div>
+      </div>
+
+      <div id="notice" class="card notice" hidden>
+        <h2 id="notice-title" class="notice-title"></h2>
+        <p id="notice-text" class="notice-text"></p>
+        <button id="retry" class="btn" type="button" hidden>Try again</button>
+      </div>
+
+      <article id="answer" class="card answer" hidden>
+        <div class="block">
+          <h2 class="label">Likely relevant law</h2>
+          <p id="a-law" class="law"></p>
+        </div>
+        <div class="block">
+          <h2 class="label">What it says in plain English</h2>
+          <p id="a-plain"></p>
+        </div>
+        <div class="block">
+          <h2 class="label">What is unclear or depends</h2>
+          <p id="a-unclear"></p>
+        </div>
+        <a id="a-link" class="btn btn-primary btn-block" target="_blank" rel="noopener noreferrer"></a>
+        <div class="feedback">
+          <span class="feedback-q">Was this pointer useful?</span>
+          <div class="feedback-btns">
+            <button type="button" class="btn btn-small" data-vote="helpful">Helpful</button>
+            <button type="button" class="btn btn-small" data-vote="wrong">Wrong</button>
+          </div>
+          <span id="fb-thanks" class="feedback-thanks" hidden></span>
+        </div>
+        <p class="disclaimer">Not legal advice. For general understanding only. Ask a lawyer for your situation.</p>
+      </article>
+    </section>
+
+    <section class="topics" aria-labelledby="topics-title">
+      <h2 id="topics-title" class="section-title">Browse by topic</h2>
+      <ul class="topic-list">
+        <li>
+          <details>
+            <summary><span class="topic-name">Tenancy</span><span class="topic-sub">Renting a room or flat, deposits, rent, ending a lease</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">My landlord wants to end my lease early because I paid rent late</button>
+              <button type="button" class="chip">I owe two months of rent and my landlord says he will take my things</button>
+              <button type="button" class="chip">My landlord won't return my deposit after I moved out</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Employment</span><span class="topic-sub">Notice, working hours, overtime, leave</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">How much notice do I give if I want to resign?</button>
+              <button type="button" class="chip">My boss makes me work 12 hours a day</button>
+              <button type="button" class="chip">How many days of annual leave do I get after two years?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Traffic</span><span class="topic-sub">Speeding, careless driving, drink driving</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">I was caught speeding on the expressway</button>
+              <button type="button" class="chip">I changed lanes without signalling and a car hit me</button>
+              <button type="button" class="chip">I had two beers at dinner and drove home</button>
+            </div>
+          </details>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Singapore legislation is subject to Singapore Government copyright and is reproduced with the permission of the Attorney-General's Chambers. Check Singapore Statutes Online (<a href="https://sso.agc.gov.sg/" target="_blank" rel="noopener noreferrer">sso.agc.gov.sg</a>) for the latest version. This site is not affiliated with or endorsed by AGC.</p>
+    <p class="foot-links"><a href="/about">About</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

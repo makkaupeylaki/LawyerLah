@@ -1,0 +1,19 @@
+name = "lawyerlah-api"
+main = "index.js"
+compatibility_date = "2026-10-01"
+
+# Workers AI (used while PROVIDER = "cloudflare" in index.js)
+[ai]
+binding = "AI"
+
+# Per-visitor daily counters (keyed on a hash of the IP, never the IP itself).
+# Create with:  npx wrangler kv namespace create LIMITS   then paste the id below.
+[[kv_namespaces]]
+binding = "LIMITS"
+id = "00000000000000000000000000000000"
+
+# Helpful / Wrong votes.
+# Create with:  npx wrangler kv namespace create FEEDBACK   then paste the id below.
+[[kv_namespaces]]
+binding = "FEEDBACK"
+id = "00000000000000000000000000000000"

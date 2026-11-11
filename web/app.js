@@ -1,0 +1,206 @@
+// lawyerlah frontend. Plain JS, no build step.
+
+// Where the Worker API lives. Empty = same origin (Worker routed at <domain>/api/*).
+// Set to the workers.dev URL if the Worker is on its own origin. On localhost it uses `wrangler dev`.
+const API_BASE = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "http://localhost:8787" : "";
+const MAX = 500;
+const TIMEOUT_MS = 30000;
+
+const $ = (id) => document.getElementById(id);
+const form = $("ask");
+const q = $("q");
+const submit = $("submit");
+const count = $("count");
+const askError = $("ask-error");
+const loading = $("loading");
+const notice = $("notice");
+const answer = $("answer");
+const retry = $("retry");
+const offline = $("offline");
+
+let lastQuestion = "";
+let lastAnswer = null;
+let busy = false;
+
+// ------------------------------------------------------------ input
+function updateCount() {
+  count.textContent = `${q.value.length} / ${MAX}`;
+  count.classList.toggle("near", q.value.length > MAX - 50);
+}
+q.addEventListener("input", () => { updateCount(); askError.hidden = true; });
+updateCount();
+
+// Enter submits on desktop; Shift+Enter for a new line.
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(hover: hover)").matches) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+// Example chips (top three and the topic lists) fill the box and ask.
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    q.value = chip.textContent.trim();
+    updateCount();
+    form.requestSubmit();
+  });
+});
+
+// ------------------------------------------------------------ states
+function show(el) {
+  for (const x of [loading, notice, answer]) x.hidden = x !== el;
+}
+
+function showNotice(title, text, { warn = false, canRetry = false } = {}) {
+  $("notice-title").textContent = title;
+  $("notice-text").textContent = text;
+  notice.classList.toggle("warn", warn);
+  retry.hidden = !canRetry;
+  show(notice);
+}
+
+function showAnswer(a) {
+  lastAnswer = a;
+  const law = $("a-law");
+  const link = $("a-link");
+  law.textContent = "";
+  if (a.act) {
+    law.append(a.act);
+    const sec = document.createElement("span");
+    sec.className = "sec";
+    sec.textContent = `Section ${a.section}`;
+    law.append(sec);
+  } else {
+    law.textContent = "Not covered";
+  }
+  $("a-plain").textContent = a.plain || "";
+  $("a-unclear").textContent = a.unclear || "";
+
+  if (a.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(a.sourceUrl)) {
+    link.href = a.sourceUrl;
+    link.textContent = `Read section ${a.section} on sso.agc.gov.sg ↗`;
+  } else {
+    link.href = "https://sso.agc.gov.sg/";
+    link.textContent = "Search sso.agc.gov.sg ↗";
+  }
+
+  for (const b of answer.querySelectorAll("[data-vote]")) {
+    b.disabled = false;
+    b.setAttribute("aria-pressed", "false");
+  }
+  $("fb-thanks").hidden = true;
+  show(answer);
+}
+
+function setOffline() {
+  offline.hidden = navigator.onLine;
+}
+window.addEventListener("online", setOffline);
+window.addEventListener("offline", setOffline);
+setOffline();
+
+// ------------------------------------------------------------ API
+async function post(path, body) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(API_BASE + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON error page */ }
+    return { status: res.status, ok: res.ok, data };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function ask(question) {
+  if (busy) return;
+  if (!navigator.onLine) {
+    showNotice("You're offline", "Check your connection, then try again.", { warn: true, canRetry: true });
+    return;
+  }
+  busy = true;
+  lastQuestion = question;
+  submit.disabled = true;
+  submit.textContent = "Asking…";
+  show(loading);
+  $("result").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+
+  try {
+    const { status, ok, data } = await post("/api/ask", { question });
+    if (ok && data && "plain" in data) {
+      showAnswer(data);
+    } else if (status === 429) {
+      showNotice("Daily limit reached", (data && data.message) || "You've used your 10 questions for today. Come back tomorrow.", { warn: true });
+    } else if (status === 400) {
+      show(null);
+      askError.textContent = (data && data.message) || "Please check your question and try again.";
+      askError.hidden = false;
+      q.focus();
+    } else {
+      showNotice("Something went wrong", (data && data.message) || "Couldn't get an answer just now.", { warn: true, canRetry: true });
+    }
+  } catch (err) {
+    const timedOut = err && err.name === "AbortError";
+    showNotice(
+      navigator.onLine ? (timedOut ? "That took too long" : "Couldn't reach lawyerlah") : "You're offline",
+      navigator.onLine ? "Please try again in a moment." : "Check your connection, then try again.",
+      { warn: true, canRetry: true }
+    );
+  } finally {
+    busy = false;
+    submit.disabled = false;
+    submit.textContent = "Ask";
+  }
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const question = q.value.replace(/\s+/g, " ").trim();
+  if (!question) {
+    askError.textContent = "Describe your situation in a few words first.";
+    askError.hidden = false;
+    q.focus();
+    return;
+  }
+  if (question.length > MAX) {
+    askError.textContent = `Keep it under ${MAX} characters.`;
+    askError.hidden = false;
+    return;
+  }
+  askError.hidden = true;
+  ask(question);
+});
+
+retry.addEventListener("click", () => { if (lastQuestion) ask(lastQuestion); });
+
+// ------------------------------------------------------------ feedback
+for (const btn of answer.querySelectorAll("[data-vote]")) {
+  btn.addEventListener("click", async () => {
+    const buttons = answer.querySelectorAll("[data-vote]");
+    buttons.forEach((b) => { b.disabled = true; });
+    btn.setAttribute("aria-pressed", "true");
+    const thanks = $("fb-thanks");
+    try {
+      const { ok } = await post("/api/feedback", {
+        vote: btn.dataset.vote,
+        question: lastQuestion,
+        act: lastAnswer && lastAnswer.act,
+        section: lastAnswer && lastAnswer.section,
+      });
+      thanks.textContent = ok ? "Thanks, noted." : "Couldn't send that. Please try again later.";
+      if (!ok) { buttons.forEach((b) => { b.disabled = false; }); btn.setAttribute("aria-pressed", "false"); }
+    } catch {
+      thanks.textContent = "Couldn't send that. Check your connection.";
+      buttons.forEach((b) => { b.disabled = false; });
+      btn.setAttribute("aria-pressed", "false");
+    }
+    thanks.hidden = false;
+  });
+}
