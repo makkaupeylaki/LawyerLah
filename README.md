@@ -53,8 +53,8 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
   - `shortAnswer`: 2–4 sentences stating the rule with its real numbers first, no section numbers or Act names.
     `howItApplies`: 1–2 neutral sentences on which part of the rule matches. `depends`: up to 5 facts that would
     change the answer.
-  - `sources`: up to 3 `{ act, section, label, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
-    Act, `label` ("section 63", or "First Schedule" / "Schedules" for the non-numeric keys), "version in force from …"
+  - `sources`: up to 6 `{ act, section, label, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
+    Act, `label` ("section 63", "Article 9" for the Constitution, or "First Schedule" / "Schedules" for the non-numeric keys), "version in force from …"
     and `note` = "Unofficial consolidation from SSO, check sso.agc.gov.sg for the official text". `sourceUrl` is always
     `https://sso.agc.gov.sg/` (the records' `source` field is plain text, not a link), so the footnote links to SSO,
     not to the section.
@@ -71,7 +71,7 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
     injection) / `bad_request`, 429 `limit` (visitor's 10/day) or `global_limit` (overall cap), 502 `model` (the
     model, embedding or Vectorize failed).
   - A visitor's question counts only after it is answered, so a failed call doesn't use one up. The global counter
-    counts every question that reaches the model, failed or not, since it guards the AI budget. Each question costs 2
+    counts every question that reaches the model, failed or not, since it guards the AI budget. Each question costs 3
     chat-model calls and 1 embedding. KV has no atomic increment, so a burst of parallel requests can overshoot either
     cap slightly.
 - `POST /api/feedback` `{ "vote": "helpful" | "wrong", question, act, section }` → `{ ok: true }`.
@@ -83,7 +83,8 @@ In `worker/index.js`:
 - `PROVIDER` — `"cloudflare"` (default) or `"deepseek"`, for the two chat calls. Embeddings always use Workers AI
   (`EMBED_MODEL`), because the index was built with that model.
 - `MODELS` — the chat model name per provider (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, `deepseek-chat`).
-- `KEYWORDS_PROMPT`, `ANSWER_PROMPT` — the two system prompts.
+- `KEYWORDS_PROMPT`, `SELECT_PROMPT`, `ANSWER_PROMPT` — the three system prompts.
+- `PINS`, `SPEED_PINS`, `EXPRESSWAY_PINS` — sections always added to the candidates for known topics.
 
 Per question:
 
@@ -91,23 +92,46 @@ Per question:
    person", "consult legal practitioner", "produced before Magistrate") and guesses up to 4 Act codes. Act names for
    the prompt come from KV `acts:index` (cached 60 s), with `CODE_NAMES` as a fallback. If this step fails, the
    plain question is used.
-2. **Search.** The question plus keywords is embedded with `@cf/baai/bge-base-en-v1.5` and Vectorize is queried
-   (`topK` 12, `returnMetadata: "all"`). Extra filtered queries on `code` run for policing questions
+2. **Candidates.** The question plus keywords is embedded with `@cf/baai/bge-base-en-v1.5` and Vectorize is queried
+   (`topK` 20, `returnMetadata: "all"`). Extra filtered queries on `code` (also `topK` 20) run for policing questions
    (`const, cpc, pfa, ea, pc, isa`), speed or driving questions (`rta, rtr, rter, rtsn`) and the model's guessed codes.
-   Results are merged and deduped by `kv_key`; the top 2 from each filtered query are always kept (they often score
-   lower than the unfiltered hits), then the rest by score.
-3. **Sections.** Up to 6 full sections are read from KV `LAWS` (sections with empty text are skipped; a very long
-   section is cut at 6,000 characters) and given to the model verbatim.
-4. **Answer.** The model answers only from those sections and cites up to 3 by id. Where the text doesn't contain the
-   answer or a number, it says "The text provided does not state this." instead of guessing.
-5. **Speed limits.** The model gives the real numbers from the speed notification text. When a speed question mentions
-   an expressway, the Worker adds fixed text: limits vary by stretch (commonly 80 to 90 km/h), only some stretches are
-   listed at 90 km/h, and the signs for that stretch set it.
+   Results are deduped by `kv_key`. Candidates are, in order: pinned sections (below), the top 3 of each filtered
+   query, then the rest by score, up to 32. Women's Charter sections are dropped unless the question or keywords are
+   about family law. Each candidate is read from KV `LAWS` (missing or empty sections are skipped).
+3. **Pinned sections.** Added to the candidates whenever the question or keywords match, main rule first:
+
+   | Topic (matched words) | Sections |
+   | --- | --- |
+   | arrest, arrested, lawyer, counsel, detained | Constitution Art. 9, CPC s 68 |
+   | police questioning, statement, silence, interview | CPC s 22, 23, 258, 261 |
+   | police search, warrant, search without warrant | CPC s 32, 34 |
+   | hacking, unauthorised access, computer | CMA s 3 first, then s 4–9 |
+   | bail | CPC s 92, 93, 95 |
+   | speed limit (general) | rtsn s 2, rtsn First–Sixth Schedules, RTA s 63 |
+   | speed limit on an expressway (expressway named in the question) | rtsn First–Sixth Schedules, RTA s 63; never rtsn s 2 |
+
+4. **Selection.** The model sees only each candidate's code, section, heading and first 200 characters, and picks the
+   3–6 that directly answer the question, basic offence or main rule first, leaving out unrelated Acts. If it picks
+   none, the answer is "Not covered". If its reply can't be read, the first 6 candidates are used.
+5. **Answer.** Only the selected sections' full text (a very long section is cut at 6,000 characters) goes to the
+   model. It answers only from them, describes the basic or main provision first, never merges penalties of different
+   offences, and tags each figure with the section it comes from. Where the sections don't directly cover the
+   question, it says "The text provided does not state this."
+6. **Expressway speed.** When the question names an expressway and is about speed, the short answer is only the fixed
+   text: limits vary by stretch (commonly 80 to 90 km/h), only some stretches are listed at 90 km/h, check the signs.
+   The general 50 km/h rule is never a candidate, the model is told not to mention it, and any sentence with 50 km/h
+   is dropped from "How it applies" and the bullets.
+
+Each question costs 3 chat-model calls (keywords, selection, answer), 1 embedding, up to 4 Vectorize queries and up
+to about 34 KV reads.
 
 The Act name, section, version date and link always come from KV, never from the model. Before an answer is returned:
 
+- **Section tags.** When the short answer uses more than one section, each figure is tagged with its section and
+  shown as "(section 3)" / "(Article 9)"; with one section, no tag is shown. This is the only place section numbers
+  appear outside the footnote.
 - **Number check.** Every number in the short answer (digits, ranges, or spelled out like "seven days") must appear
-  with the same unit in the verbatim text of the sections given to the model ("50 kilometres per hour" counts as
+  with the same unit in the verbatim text of the section it is tagged with (untagged: any of the sections used) ("50 kilometres per hour" counts as
   "50 km/h"). Digits in the Act name, section number or heading don't count, and the Act year never passes as a
   quantity. Speed tables often list bare numbers, so "N km/h" also passes when N appears in a section that talks about
   km/h. A sentence that fails is dropped. "How it applies" and the bullets get the same check, but may also repeat
@@ -116,8 +140,8 @@ The Act name, section, version date and link always come from KV, never from the
   the check doesn't recognise as a number.
 - **References stripped.** Every reference to a section, s., sec., §, article, rule or paragraph number, or to an
   Act, Code, Rules, Notification, Charter or the Constitution (name, year, Cap. number or abbreviation such as "CPC"),
-  is removed from the short answer and "How it applies", or replaced with "the rule" / "the law". The footnote is the
-  only place for them. "The law does not state" is reworded to "the text provided does not state".
+  is removed from the short answer and "How it applies", or replaced with "the rule" / "the law". Apart from the
+  section tags above, the footnote is the only place for them. "The law does not state" is reworded to "the text provided does not state".
 - **Wording filter.** Any sentence that says legal/illegal/lawful/unlawful (statutory terms like "legal practitioner"
   and "legal aid" are allowed), entitled, breach, guilty, liable, gives odds, or gives advice ("you should",
   "I recommend") is dropped.
@@ -171,6 +195,17 @@ npx wrangler deploy                         # deploys the Worker and uploads web
 ```
 
 Add a custom domain to the Worker in the Cloudflare dashboard if you want one, and set `SITE_URL` to it.
+
+## Tests
+
+```sh
+node worker/test/e2e.test.mjs   # end-to-end /api/ask with fake AI, Vectorize and KV; no network or packages needed
+```
+
+Covers six real questions with their expected sections (lawyer when arrested → Constitution Art. 9; police questions
+→ CPC s 22, 23; basic hacking → $5,000 and 2 years under CMA s 3; police search without warrant → CPC s 34;
+expressway speed → fixed sentence only; tenancy → not covered), plus the selection fallback, `topK` and outage paths.
+The fake model picks whatever expected sections it is shown, so the test checks the pipeline, not the real model.
 
 ## Local development
 
