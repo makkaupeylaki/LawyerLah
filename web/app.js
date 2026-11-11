@@ -65,6 +65,8 @@ function showAnswer(a) {
   if (a.demo) $("a-demo-title").textContent = a.demoNotice || "DEMO DATA, not real law";
 
   $("a-short").textContent = a.shortAnswer || "";
+  $("a-figures").textContent = a.figuresNote || "";
+  $("a-figures").hidden = !a.figuresNote;
   $("a-how").textContent = a.howItApplies || "";
   $("a-how-block").hidden = !a.howItApplies;
 

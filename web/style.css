@@ -110,6 +110,10 @@ textarea:focus { border-color: var(--accent); outline: none; }
   margin: 0; font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
 }
 .short-answer { font-size: 18px; line-height: 1.5; }
+.block .figures-note {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: var(--warn-bg); color: var(--warn); font-size: 14px;
+}
 .depends { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .source { color: var(--faint); font-size: 12px; line-height: 1.5; }
 .source p { margin: 0; }

@@ -15,6 +15,14 @@ run_worker_first = ["/api/*", "/", "/index.html", "/about", "/about.html"]
 [ai]
 binding = "AI"
 
+# Law entries: one key "laws" (JSON array / data/laws.json shape) or one key per entry.
+# Laws are changed by writing to this namespace (see README), not by redeploying.
+# If it is empty, the Worker falls back to data/laws.json.
+# Create with:  npx wrangler kv namespace create LAWS   then paste the id below.
+[[kv_namespaces]]
+binding = "LAWS"
+id = "00000000000000000000000000000000"
+
 # Per-visitor daily counters (keyed on a hash of the IP, never the IP itself)
 # and the global daily AI cap counter.
 # Create with:  npx wrangler kv namespace create LIMITS   then paste the id below.
