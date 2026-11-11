@@ -60,32 +60,23 @@ function showNotice(title, text, { warn = false, canRetry = false } = {}) {
 
 function showAnswer(a) {
   lastAnswer = a;
-  const law = $("a-law");
-  const link = $("a-link");
-  law.textContent = "";
-  if (a.act) {
-    law.append(a.act);
-    const sec = document.createElement("span");
-    sec.className = "sec";
-    sec.textContent = `Section ${a.section}`;
-    law.append(sec);
-  } else {
-    law.textContent = "Not covered";
-  }
   const demo = $("a-demo");
   demo.hidden = !a.demo;
   if (a.demo) $("a-demo-title").textContent = a.demoNotice || "DEMO DATA, not real law";
 
-  $("a-plain").textContent = a.plain || "";
-  $("a-unclear").textContent = a.unclear || "";
+  $("a-short").textContent = a.shortAnswer || "";
+  $("a-how").textContent = a.howItApplies || "";
+  $("a-how-block").hidden = !a.howItApplies;
 
-  if (a.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(a.sourceUrl)) {
-    link.href = a.sourceUrl;
-    link.textContent = `Read section ${a.section} on sso.agc.gov.sg ↗`;
-  } else {
-    link.href = "https://sso.agc.gov.sg/";
-    link.textContent = "Search sso.agc.gov.sg ↗";
+  const depends = $("a-depends");
+  depends.textContent = "";
+  for (const d of Array.isArray(a.depends) ? a.depends : []) {
+    const li = document.createElement("li");
+    li.textContent = d;
+    depends.append(li);
   }
+
+  renderSources(Array.isArray(a.sources) ? a.sources : []);
 
   renderRoutes(Array.isArray(a.routes) ? a.routes : []);
 
@@ -95,6 +86,36 @@ function showAnswer(a) {
   }
   $("fb-thanks").hidden = true;
   show(answer);
+}
+
+// Source footnote: "Source: Act, s N · sso.agc.gov.sg ↗" per matched section (no link for demo data).
+function renderSources(sources) {
+  const box = $("a-source");
+  box.textContent = "";
+  const link = (href, text) => {
+    const el = document.createElement("a");
+    el.href = href;
+    el.target = "_blank";
+    el.rel = "noopener noreferrer";
+    el.textContent = text;
+    return el;
+  };
+  if (!sources.length) {
+    const p = document.createElement("p");
+    p.append("Source: no matching section. ", link("https://sso.agc.gov.sg/", "Search sso.agc.gov.sg ↗"));
+    box.append(p);
+    return;
+  }
+  for (const s of sources) {
+    const p = document.createElement("p");
+    p.append(`Source: ${s.act}, section ${s.section}${s.title ? ` (${s.title})` : ""} · `);
+    if (s.sourceUrl && /^https:\/\/sso\.agc\.gov\.sg\//.test(s.sourceUrl)) {
+      p.append(link(s.sourceUrl, "sso.agc.gov.sg ↗"));
+    } else {
+      p.append("no link (demo data)");
+    }
+    box.append(p);
+  }
 }
 
 function renderRoutes(routes) {
@@ -171,7 +192,7 @@ async function ask(question) {
 
   try {
     const { status, ok, data } = await post("/api/ask", { question });
-    if (ok && data && "plain" in data) {
+    if (ok && data && "shortAnswer" in data) {
       showAnswer(data);
     } else if (status === 429 && data && data.error === "global_limit") {
       showNotice("That's all for today", data.message || "LawyerLah has answered all the questions it can for today. Please come back tomorrow.", { warn: true });
@@ -230,8 +251,8 @@ for (const btn of answer.querySelectorAll("[data-vote]")) {
       const { ok } = await post("/api/feedback", {
         vote: btn.dataset.vote,
         question: lastQuestion,
-        act: lastAnswer && lastAnswer.act,
-        section: lastAnswer && lastAnswer.section,
+        act: lastAnswer && (lastAnswer.sources || []).map((s) => s.act).join("; "),
+        section: lastAnswer && (lastAnswer.sources || []).map((s) => s.section).join("; "),
       });
       thanks.textContent = ok ? "Thanks, noted." : "Couldn't send that. Please try again later.";
       if (!ok) { buttons.forEach((b) => { b.disabled = false; }); btn.setAttribute("aria-pressed", "false"); }

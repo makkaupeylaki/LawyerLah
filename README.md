@@ -44,11 +44,16 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
 
 ## API
 
-- `POST /api/ask` `{ "question": "..." }` → `{ act, section, plain, unclear, sourceUrl, demo, demoNotice, routes }`.
-  - `demo: true`, `demoNotice: "DEMO DATA, not real law"` and `sourceUrl: null` when the matched entry is marked
-    PLACEHOLDER (`"placeholder": true` or "PLACEHOLDER" in its text). The page shows a banner on every such answer.
-  - `routes`: `[{ name, what, eligibility, limits, url }]` from `data/routes.json` for the matched topic.
-  - Not covered → `act`, `section` and `sourceUrl` are `null`, `routes` is empty, and `plain` starts with "Not covered".
+- `POST /api/ask` `{ "question": "..." }` →
+  `{ notCovered, shortAnswer, howItApplies, depends[], sources[], demo, demoNotice, routes }`.
+  - `shortAnswer`: 2–4 sentences stating the rule with its real numbers, no section numbers. `howItApplies`: 1–2
+    neutral sentences on which part of the rule matches. `depends`: up to 5 facts that would change the answer.
+  - `sources`: up to 3 `{ act, section, title, sourceUrl }`, shown as a small "Source" footnote.
+  - `demo: true` and `demoNotice: "DEMO DATA, not real law"` when any matched entry is PLACEHOLDER
+    (`"placeholder": true` or "PLACEHOLDER" in its text); that entry's `sourceUrl` is `null`. The page shows a banner
+    on every such answer.
+  - `routes`: `[{ name, what, eligibility, limits, url }]` from `data/routes.json` for the matched topics.
+  - Not covered → `notCovered: true`, `sources` and `routes` are empty, and `shortAnswer` starts with "Not covered".
   - Errors are `{ error, message }`: 400 `empty` / `too_long` (over 500 chars) / `rejected` (abusive words or prompt
     injection) / `bad_request`, 429 `limit` (visitor's 10/day) or `global_limit` (overall cap), 502 `model`.
   - A visitor's question counts only after the model answers, so a failed model call doesn't use one up. The global
@@ -62,12 +67,20 @@ In `worker/index.js`:
 
 - `PROVIDER` — `"cloudflare"` (default) or `"deepseek"`.
 - `MODELS` — the model name per provider (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, `deepseek-chat`).
-- `SYSTEM_PROMPT` — only use the provided law text, cite one entry by id, answer "not covered" if nothing fits, never
-  a legal/illegal verdict, never advice, reply in JSON.
+- `SYSTEM_PROMPT` — answer only from the provided law text, copy numbers exactly, say what's missing instead of
+  guessing, cite up to 3 entries by id, answer "not covered" if nothing fits, never a legal/illegal verdict, never
+  advice, reply in JSON.
 
-The model only picks an entry id; the Act name, section and SSO link always come from `data/laws.json`, never from the
-model. Any sentence in the model's reply that says legal/illegal/lawful/unlawful, guilty, or gives advice
-("you should", "I recommend") is dropped before it is returned.
+The model picks up to 3 entry ids and writes the short answer, how it applies and the bullets from those entries'
+official text, summary and key numbers only. The Act name, section and SSO link always come from `data/laws.json`,
+never from the model. Before an answer is returned:
+
+- any sentence with a number that isn't in the matched entries is dropped (in "How it applies" and the bullets,
+  numbers from the person's own question are allowed too), so a guessed figure never reaches the page;
+- section references are stripped from the short answer;
+- any sentence that says legal/illegal/lawful/unlawful, entitled, breach, guilty, liable, gives odds, or gives advice
+  ("you should", "I recommend") is dropped;
+- if nothing usable is left, the short answer falls back to the entries' human-written `summary`.
 
 ## Official routes
 
@@ -79,7 +92,11 @@ official pages (last checked November 2026).
 ## Law data
 
 `data/laws.json` has `topics.{tenancy,employment,traffic}`, each a list of
-`{ id, placeholder, act, section, title, text, sourceUrl }`. All entries are **PLACEHOLDER**: the text is a stand-in,
+`{ id, placeholder, act, section, title, officialText, summary, keyNumbers: [{ label, value }], sourceUrl }`:
+`officialText` is the section's wording from SSO, `summary` a plain-English summary of it, and `keyNumbers` every figure
+(speed limits, fines, demerit points, notice periods, deadlines) exactly as the text states it. A `keyNumbers` value of
+`"PLACEHOLDER"` means the figure isn't supplied yet, and the answer says the text doesn't state it.
+All entries are **PLACEHOLDER**: the text is a stand-in,
 and the Act names, section numbers and `sourceUrl` deep links (`https://sso.agc.gov.sg/Act/<code>?ProvIds=pr<n>-#pr<n>-`)
 must be checked against SSO when the real text is supplied. The Worker bundles this file at deploy time, so redeploy
 after editing it.
