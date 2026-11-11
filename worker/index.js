@@ -1,15 +1,16 @@
 // LawyerLah: one Cloudflare Worker serves the static site (web/, Workers static assets) and the API.
 //
 //   POST /api/ask       { question }  -> { shortAnswer, howItApplies, depends[], sources[], notCovered,
-//                                          demo, demoNotice, routes }
+//                                          figuresNote, demo, demoNotice, routes }
 //   POST /api/feedback  { vote, question, act, section }  -> { ok: true }
 //   everything else     -> static files from web/ (binding ASSETS)
 //
-// Bindings (see README): ASSETS (static assets), AI (Workers AI), LIMITS (KV), FEEDBACK (KV).
+// Bindings (see README): ASSETS (static assets), AI (Workers AI), LAWS (KV), LIMITS (KV), FEEDBACK (KV).
 // Vars: GLOBAL_DAILY_CAP (default 300), SITE_URL (optional, absolute base for canonical/OG URLs).
 // Optional secret, only for PROVIDER = "deepseek": DEEPSEEK_API_KEY (wrangler secret put).
 
-import laws from "../data/laws.json" with { type: "json" };
+// Fallback law data, used only when the LAWS KV namespace is missing or empty.
+import bundledLaws from "../data/laws.json" with { type: "json" };
 import officialRoutes from "../data/routes.json" with { type: "json" };
 
 // ---------------------------------------------------------------- model config
@@ -56,26 +57,127 @@ const BANNED = /\b(il)?legal(ly|ity)?\b|\b(un)?lawful(ly)?\b|\byou should\b|\bI 
 // Input that is rejected outright: profanity/slurs and obvious prompt-injection attempts.
 const ABUSIVE = /\b(fuck\w*|shit\w*|cunt\w*|bitch\w*|asshole\w*|bastard\w*|motherfuck\w*|nigg\w*|fag\w*|retard\w*|kanina\w*|knn|cheebye|chee bye|ccb|lanjiao|pukimak\w*)\b|ignore (all |any |the )?(previous|prior|above) (instructions|rules|prompt)|system prompt/i;
 
-const ENTRIES = Object.entries(laws.topics).flatMap(([topic, list]) => list.map((e) => ({ ...e, topic })));
-const BY_ID = new Map(ENTRIES.map((e) => [e.id, e]));
-
 // An entry is demo data if it is marked placeholder or its text says PLACEHOLDER.
 const DEMO_NOTICE = "DEMO DATA, not real law";
 const isPlaceholder = (e) =>
   e.placeholder === true || /PLACEHOLDER/.test(`${e.officialText} ${e.summary} ${e.act} ${e.section}`);
 
 const keyNumbers = (e) => (Array.isArray(e.keyNumbers) ? e.keyNumbers : []);
-const LAW_TEXT = ENTRIES.map((e) => {
-  const nums = keyNumbers(e).map((k) => `- ${k.label}: ${k.value}`).join("\n") || "- (none listed)";
-  return `<law id="${e.id}">\nAct: ${e.act}\nSection: ${e.section} (${e.title})\n` +
-    `Official text: ${e.officialText}\nPlain-English summary: ${e.summary}\nKey numbers:\n${nums}\n</law>`;
-}).join("\n");
 
-// Every number an entry contains (official text, summary, key numbers, Act name), normalised: "1,000" -> "1000".
-const numbersIn = (text) => (String(text).match(/\d[\d,]*(?:\.\d+)?/g) || []).map((n) => n.replace(/,/g, ""));
-const ENTRY_NUMBERS = new Map(ENTRIES.map((e) => [e.id, new Set(numbersIn(
-  [e.act, e.section, e.title, e.officialText, e.summary, ...keyNumbers(e).map((k) => `${k.label} ${k.value}`)].join(" ")
-))]));
+// ---------------------------------------------------------------- law data (KV LAWS, cached 60 s)
+// LAWS holds either one key "laws" (a JSON array of entries, each with a "topic", or the same { topics: {...} }
+// object as data/laws.json), or one key per entry (any other key name, value = one entry with a "topic").
+// If LAWS is missing, empty or unreadable, data/laws.json (bundled at deploy) is used instead.
+const LAWS_TTL_MS = 60 * 1000;
+let lawsCache = null; // { at, promise }
+
+function entriesFrom(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object" && data.topics && typeof data.topics === "object") {
+    return Object.entries(data.topics).flatMap(([topic, list]) =>
+      (Array.isArray(list) ? list : []).map((e) => ({ topic, ...e })));
+  }
+  return [];
+}
+
+const validEntry = (e) =>
+  e && typeof e === "object" && typeof e.id === "string" && e.id &&
+  typeof e.act === "string" && e.act && e.section != null && typeof e.topic === "string" && e.topic;
+
+async function readKvLaws(kv) {
+  const single = await kv.get("laws", "json");
+  if (single) return entriesFrom(single);
+  const entries = [];
+  let cursor;
+  do {
+    const page = await kv.list(cursor ? { cursor } : {});
+    const values = await Promise.all(page.keys.map((k) => kv.get(k.name, "json").catch(() => null)));
+    entries.push(...values.flatMap((v) => (Array.isArray(v) ? v : [v])));
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+  return entries;
+}
+
+function buildIndex(rawEntries, source) {
+  const entries = rawEntries.filter(validEntry).map((e) => ({ ...e, section: String(e.section) }));
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const lawText = entries.map((e) => {
+    const nums = keyNumbers(e).map((k) => `- ${k.label}: ${k.value}`).join("\n") || "- (none listed)";
+    return `<law id="${e.id}">\nAct: ${e.act}\nSection: ${e.section} (${e.title || ""})\n` +
+      `Official text: ${e.officialText || ""}\nPlain-English summary: ${e.summary || ""}\nKey numbers:\n${nums}\n</law>`;
+  }).join("\n");
+  return { entries, byId, lawText, source };
+}
+
+async function loadLaws(env) {
+  if (lawsCache && Date.now() - lawsCache.at < LAWS_TTL_MS) return lawsCache.promise;
+  const promise = (async () => {
+    if (env.LAWS) {
+      try {
+        const index = buildIndex(await readKvLaws(env.LAWS), "kv");
+        if (index.entries.length) return index;
+      } catch (err) {
+        console.error("LAWS KV read failed, using data/laws.json", err && err.message);
+      }
+    }
+    return buildIndex(entriesFrom(bundledLaws), "bundled");
+  })();
+  lawsCache = { at: Date.now(), promise };
+  promise.catch(() => { lawsCache = null; });
+  return promise;
+}
+
+// ---------------------------------------------------------------- number guard
+// A quantity is a number plus its unit: "$1,000" -> ["1000", "$"], "50 km/h" -> ["50", "km/h"],
+// "7 days" -> ["7", "day"], "12 demerit points" -> ["12", "demerit"]. Spelled-out numbers followed by a unit
+// ("seven days", "seven parts") are checked too.
+const WORD_NUMBERS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11,
+  twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, ninety: 90, hundred: 100,
+};
+const WORD_UNITS = /^(second|minute|hour|day|week|month|year|time|point|demerit|dollar|km|kilometre|metre|cent|percent|%)/;
+const QTY = /(\$|S\$|SGD\s?)?(\d[\d,]*(?:\.\d+)?|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|ninety|hundred)\b)(?:\s*(%|km\/h|[A-Za-z]+))?/gi;
+
+function normUnit(u) {
+  if (!u) return "";
+  u = u.toLowerCase();
+  if (u === "km/h" || u === "%") return u;
+  if (u === "per" || u === "percent") return "%";
+  if (u === "dollars" || u === "dollar" || u === "sgd") return "$";
+  return u.replace(/(ies)$/, "y").replace(/(?<!s)s$/, "");
+}
+
+function quantities(text) {
+  const out = [];
+  for (const m of String(text).matchAll(QTY)) {
+    const [, cur, raw, unitRaw] = m;
+    const isWord = /^[a-z]/i.test(raw);
+    const unit = cur ? "$" : normUnit(unitRaw);
+    // Spelled-out numbers always count, except "one" without a unit ("one of the rules" is not a quantity).
+    if (isWord && raw.toLowerCase() === "one" && !WORD_UNITS.test(unit)) continue;
+    const value = isWord ? String(WORD_NUMBERS[raw.toLowerCase()]) : raw.replace(/,/g, "");
+    out.push({ value, unit });
+  }
+  return out;
+}
+
+// Allowed number+unit pairs come ONLY from keyNumbers values (digits in the Act name, section number or the
+// rest of the law text do not count). Act years are never allowed as quantities.
+function numberGuard(entries, extraValues = []) {
+  const pairs = new Set();
+  for (const e of entries) {
+    for (const k of keyNumbers(e)) for (const q of quantities(k.value)) pairs.add(`${q.value}|${q.unit}`);
+  }
+  const actYears = new Set(entries.flatMap((e) => (String(e.act).match(/\b(1[89]|20)\d{2}\b/g) || [])));
+  const extras = new Set(extraValues);
+  return (sentence) =>
+    quantities(sentence).every((q) => (!actYears.has(q.value) || extras.has(q.value)) &&
+      (pairs.has(`${q.value}|${q.unit}`) || extras.has(q.value)));
+}
+
+const hasFigures = (e) => keyNumbers(e).some((k) => quantities(k.value).length > 0);
+const FIGURES_NOTE = "The exact figures are not in the text I have. Check the source below.";
 
 // ---------------------------------------------------------------- the one model entry point
 // Sends `prompt` (the user message) with SYSTEM_PROMPT to the configured provider and
@@ -173,26 +275,55 @@ function globalCap(env) {
 const sentencesOf = (s) =>
   typeof s === "string" ? s.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=[A-Z"'(])/) : [];
 
-// Keep at most `max` sentences, dropping any with verdict/advice wording, and (when `allowed` is given)
-// any with a number that is not in the matched entries, so a guessed figure never reaches the page.
-function clean(s, { max = 4, allowed = null } = {}) {
+// Keep at most `max` sentences, dropping any with verdict/advice wording, and (when `check` is given) any
+// sentence whose numbers fail the number guard.
+function clean(s, { max = 4, check = null } = {}) {
   return sentencesOf(s)
     .map((x) => x.trim())
     .filter((x) => x && !BANNED.test(x))
-    .filter((x) => !allowed || numbersIn(x).every((n) => allowed.has(n)))
+    .filter((x) => !check || check(x))
     .slice(0, max)
     .join(" ")
     .slice(0, 900);
 }
 
-// The short answer must read on its own: remove references to section numbers ("under section 63 of the
-// Road Traffic Act 1961,", "(s 38)", "Section 10 says").
-function stripSectionRefs(s) {
-  return s
-    .replace(/\(\s*(?:sections?|ss?\.?|sec\.?)\s*\d+[A-Z]*(?:\(\w+\))*[^)]*\)/gi, "")
-    .replace(/\b(?:under|in|by)\s+(?:sub)?sections?\s*\d+[A-Z]*(?:\(\w+\))*(?:\s+of\s+the\s+[A-Z][\w ]*?Act(?:\s+\d{4})?)?,?\s*/gi, "")
-    .replace(/\b(?:sub)?sections?\s*\d+[A-Z]*(?:\(\w+\))*(?:\s+of\s+the\s+[A-Z][\w ]*?Act(?:\s+\d{4})?)?\s+(says|states|provides|sets out)\s+(that\s+)?/gi, "")
-    .replace(/\s+([,.])/g, "$1")
+// The short answer and "How it applies" must read on their own: every reference to a section, s., sec. or an
+// Act is removed or replaced with "the rule" / "the law". The source footnote is the only place for these.
+const SEC_NUM = String.raw`\d+[A-Z]{0,2}(?:\s*\(\w{1,4}\))*(?:\s*(?:,|and|or|to|-|–)\s*\d+[A-Z]{0,2}(?:\s*\(\w{1,4}\))*)*`;
+const SEC_WORD = String.raw`(?:sub-?)?(?:sections?|secs?\.?|ss?\.|ss?(?=\s*\d)|§§?)`;
+const SEC_REF = String.raw`${SEC_WORD}\s*${SEC_NUM}`;
+const ACT_NAME = String.raw`(?:(?:the|this|that)\s+)?(?:[A-Z][\w'’()-]*\s+){1,8}Act(?:\s*,?\s*(?:\(\s*)?(?:Cap\.?\s*\d+[A-Z]?|\d{4})\)?)?(?:\s*\([A-Z][A-Za-z]{1,6}\))?`;
+const OF_ACT = String.raw`(?:\s+(?:of|in|under)\s+(?:${ACT_NAME}|(?:the|this)\s+Act\b))?`;
+// One reference, or several joined by "and" / "or" / commas ("s 63 and the Road Traffic Act").
+const REF_ONE = String.raw`(?:${SEC_REF}${OF_ACT}|${ACT_NAME}|(?:the|this)\s+Act\b)`;
+const REFS = String.raw`${REF_ONE}(?:\s*(?:,|and|or|,\s*and)\s*${REF_ONE})*`;
+const LEAD = String.raw`(?:under|in|by|according to|as set out in|pursuant to|as stated in|as provided in|per)`;
+
+// Abbreviations of the matched Acts ("Road Traffic Act" -> "RTA"), so "the RTA" is caught too.
+const actAbbrevs = (entries) =>
+  [...new Set(entries.map((e) => (String(e.act).match(/\b[A-Z]/g) || []).join("")).filter((a) => a.length >= 2))];
+
+function stripRefs(s, entries = []) {
+  const abbrevs = actAbbrevs(entries);
+  const abbrevRe = abbrevs.length ? new RegExp(String.raw`(?:\s*\((?:${abbrevs.join("|")})\))|\b(?:[Tt]he\s+)?(?:${abbrevs.join("|")})\b`, "g") : null;
+  let out = String(s)
+    // parentheticals that cite something: "(section 63)", "(s 38(1))", "(see § 63)", "(Road Traffic Act 1961)"
+    .replace(new RegExp(String.raw`\s*\((?:[^()]|\([^()]*\))*?(?<!\w)(?:${SEC_WORD}\s*\d|Act\b)(?:[^()]|\([^()]*\))*\)`, "gi"), "")
+    // "Under section 63 of the Road Traffic Act 1961," / "Under the Road Traffic Act,"
+    .replace(new RegExp(String.raw`\b${LEAD}\s+${REFS}\s*,?\s*`, "gi"), "")
+    // "Section 63 says that" / "The Act states"
+    .replace(new RegExp(String.raw`(?<!\w)${REFS}\s+(?:says|say|states|state|provides|provide|sets out|set out|requires|explains|specifies)\s+(?:that\s+)?`, "gi"), "")
+    // anything left: "section 63 of the X Act" -> "the rule" ("sections 63 and 64" -> "the rules"),
+    // "the X Act 1961" -> "the law"
+    .replace(new RegExp(String.raw`(?<!\w)(?:the\s+)?${SEC_REF}${OF_ACT}`, "gi"),
+      (m) => (/^(?:the\s+)?(?:sub-?)?(?:sections|ss|§§)|\d\s*(?:,|and|or|to|-|–)\s*\d/i.test(m) ? "the rules" : "the rule"))
+    .replace(new RegExp(ACT_NAME, "g"), "the law");
+  if (abbrevRe) out = out.replace(abbrevRe, (m) => (m.trim().startsWith("(") ? "" : "the law"));
+  return out
+    .replace(/\b(?:the|this)\s+Act\b/gi, "the law")
+    .replace(/\b(this|that|the)\s+(?:sub-?)?section\b/gi, "$1 rule")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,;:])\s*([.!?])/g, "$2")
     .replace(/\s{2,}/g, " ")
     .replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase())
     .trim();
@@ -212,6 +343,7 @@ const NOT_COVERED = {
   notCovered: true,
   shortAnswer:
     "Not covered. LawyerLah couldn't match this to the law text it has. For now it only covers a few sections on tenancy, employment and traffic.",
+  figuresNote: null,
   howItApplies: "",
   depends: [
     "Your situation may fall under a different Act or section.",
@@ -251,7 +383,8 @@ async function handleAsk(request, env) {
     return json({ error: "global_limit", message: "LawyerLah has answered all the questions it can for today. Please come back tomorrow (resets at midnight, Singapore time)." }, 429);
   }
 
-  const prompt = `<laws>\n${LAW_TEXT}\n</laws>\n\n<question>\n${question}\n</question>`;
+  const laws = await loadLaws(env);
+  const prompt = `<laws>\n${laws.lawText}\n</laws>\n\n<question>\n${question}\n</question>`;
   let reply;
   try {
     reply = parseModel(await askModel(prompt, env));
@@ -263,20 +396,22 @@ async function handleAsk(request, env) {
   await bump(env.LIMITS, visitorKeyName, visitorUsed);
 
   const ids = reply && Array.isArray(reply.ids) ? reply.ids : reply && typeof reply.id === "string" ? [reply.id] : [];
-  const entries = [...new Set(ids)].map((id) => BY_ID.get(id)).filter(Boolean).slice(0, MAX_SOURCES);
+  const entries = [...new Set(ids)].map((id) => laws.byId.get(id)).filter(Boolean).slice(0, MAX_SOURCES);
   if (!entries.length) return json(NOT_COVERED);
 
-  const allowed = new Set(entries.flatMap((e) => [...ENTRY_NUMBERS.get(e.id)]));
+  // Short answer: every number must be a keyNumbers value with its unit.
+  const generated = clean(stripRefs(String(reply.shortAnswer || ""), entries), { max: 4, check: numberGuard(entries) });
+  // Fallback: the entries' human-written summaries.
   const shortAnswer =
-    clean(stripSectionRefs(String(reply.shortAnswer || "")), { max: 4, allowed }) ||
-    // Fallback: the human-written summaries from data/laws.json.
-    clean(stripSectionRefs(entries.map((e) => String(e.summary).replace(/PLACEHOLDER\.?\s*/g, "")).join(" ")), { max: 4 });
+    generated ||
+    clean(stripRefs(entries.map((e) => String(e.summary || "").replace(/PLACEHOLDER\.?\s*/g, "")).join(" "), entries), { max: 4 });
   if (!shortAnswer) return json(NOT_COVERED);
+  const figuresNote = !generated || !entries.every(hasFigures) ? FIGURES_NOTE : null;
 
   // "How it applies" and the bullets may also repeat numbers from the person's own description.
-  const allowedFacts = new Set([...allowed, ...numbersIn(question)]);
+  const checkFacts = numberGuard(entries, quantities(question).map((q) => q.value));
   const depends = (Array.isArray(reply.depends) ? reply.depends : [])
-    .map((d) => clean(String(d), { max: 1, allowed: allowedFacts }).slice(0, 200))
+    .map((d) => clean(String(d), { max: 1, check: checkFacts }).slice(0, 200))
     .filter(Boolean)
     .slice(0, 5);
 
@@ -290,8 +425,9 @@ async function handleAsk(request, env) {
   return json({
     notCovered: false,
     shortAnswer,
+    figuresNote,
     howItApplies:
-      clean(String(reply.howItApplies || ""), { max: 2, allowed: allowedFacts }) ||
+      clean(stripRefs(String(reply.howItApplies || ""), entries), { max: 2, check: checkFacts }) ||
       "How the rule applies depends on the full facts and the exact wording of the law.",
     depends: depends.length ? depends : ["The full facts and the exact wording of the law."],
     // Source footnote. No SSO deep link for a placeholder entry: the section shown may not be the real one.
