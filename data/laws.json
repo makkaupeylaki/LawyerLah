@@ -1,0 +1,92 @@
+{
+  "_note": "PLACEHOLDER DATA. Every entry below is a stand-in until the real section text is supplied. Act names, section numbers and sourceUrl links must be checked against sso.agc.gov.sg before launch.",
+  "topics": {
+    "tenancy": [
+      {
+        "id": "tenancy-1",
+        "placeholder": true,
+        "act": "Conveyancing and Law of Property Act 1886",
+        "section": "18",
+        "title": "Restrictions on and relief against forfeiture of leases",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about when a landlord may end a lease early because the tenant broke a term, the notice the landlord gives first, and when a court may let the tenancy continue.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/CLPA1886?ProvIds=pr18-#pr18-"
+      },
+      {
+        "id": "tenancy-2",
+        "placeholder": true,
+        "act": "Distress Act 1934",
+        "section": "5",
+        "title": "Application for writ of distress",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about a landlord applying to court for a writ of distress to recover unpaid rent, which can allow goods on the premises to be seized.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/DA1934?ProvIds=pr5-#pr5-"
+      },
+      {
+        "id": "tenancy-3",
+        "placeholder": true,
+        "act": "Small Claims Tribunals Act 1984",
+        "section": "5",
+        "title": "Jurisdiction of tribunals",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about which claims the Small Claims Tribunals can hear, including some claims about residential tenancies such as deposits, and the limits on claim amounts.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/SCTA1984?ProvIds=pr5-#pr5-"
+      }
+    ],
+    "employment": [
+      {
+        "id": "employment-1",
+        "placeholder": true,
+        "act": "Employment Act 1968",
+        "section": "10",
+        "title": "Notice of termination of contract",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about how much notice an employer or employee gives to end an employment contract, depending on length of service and what the contract says.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/EmA1968?ProvIds=pr10-#pr10-"
+      },
+      {
+        "id": "employment-2",
+        "placeholder": true,
+        "act": "Employment Act 1968",
+        "section": "38",
+        "title": "Hours of work",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about normal working hours, limits on overtime, and the rate of pay for overtime work for employees it covers.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/EmA1968?ProvIds=pr38-#pr38-"
+      },
+      {
+        "id": "employment-3",
+        "placeholder": true,
+        "act": "Employment Act 1968",
+        "section": "88A",
+        "title": "Annual leave",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about paid annual leave, how many days an employee gets based on years of service, and when leave is earned.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/EmA1968?ProvIds=pr88A-#pr88A-"
+      }
+    ],
+    "traffic": [
+      {
+        "id": "traffic-1",
+        "placeholder": true,
+        "act": "Road Traffic Act 1961",
+        "section": "63",
+        "title": "Speed limits",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about speed limits on roads and for classes of vehicles, and the penalties for driving faster than the limit.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/RTA1961?ProvIds=pr63-#pr63-"
+      },
+      {
+        "id": "traffic-2",
+        "placeholder": true,
+        "act": "Road Traffic Act 1961",
+        "section": "65",
+        "title": "Driving without due care or reasonable consideration",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about driving without due care and attention or without reasonable consideration for other road users, and the penalties, which are higher if someone is hurt.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/RTA1961?ProvIds=pr65-#pr65-"
+      },
+      {
+        "id": "traffic-3",
+        "placeholder": true,
+        "act": "Road Traffic Act 1961",
+        "section": "67",
+        "title": "Driving while under influence of drink or drugs",
+        "text": "PLACEHOLDER. Real text to be supplied. This section is about driving or being in charge of a vehicle while unfit through drink or drugs, or above the alcohol limit, and the penalties including disqualification.",
+        "sourceUrl": "https://sso.agc.gov.sg/Act/RTA1961?ProvIds=pr67-#pr67-"
+      }
+    ]
+  }
+}
