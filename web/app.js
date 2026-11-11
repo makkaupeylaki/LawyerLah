@@ -112,7 +112,7 @@ function renderSources(sources) {
   for (const s of sources) {
     const p = document.createElement("p");
     const heading = s.heading || s.title;
-    p.append(`Source: ${s.act}, section ${s.section}${heading ? ` (${heading})` : ""}`);
+    p.append(`Source: ${s.act}, ${s.label || `section ${s.section}`}${heading ? ` (${heading})` : ""}`);
     if (s.inForceFrom) p.append(` · version in force from ${s.inForceFrom}`);
     p.append(" · ");
     if (s.note) {
