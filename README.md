@@ -33,13 +33,13 @@ browser ──► GET  /, /about, /style.css …  ──► worker/index.js ─�
 | Binding | Type | Used for |
 | --- | --- | --- |
 | `ASSETS` | Workers static assets (`[assets]`, directory `../web`) | The site itself |
-| `AI` | Workers AI | The chat model (while `PROVIDER = "cloudflare"`) and, always, the embedding model `@cf/baai/bge-base-en-v1.5` |
+| `AI` | Workers AI | The chat model `@cf/deepseek-ai/deepseek-v4.1-flash-1017` (while `PROVIDER = "cloudflare"`) and, always, the embedding model `@cf/baai/bge-base-en-v1.5` |
 | `VECTORIZE` | Vectorize index `lawyerlah-laws` (768 dims, cosine, metadata index on `code`) | Finding the relevant sections. Read only. |
 | `LAWS` | KV namespace | Full section text `law:{code}:{section}`, plus `act:{code}` and `acts:index`. Read only. |
 | `LIMITS` | KV namespace | Daily counters: `ask:<date>:<hash>` (10 questions per visitor), `global:<date>` (all visitors, `GLOBAL_DAILY_CAP`) and `fb:<date>:<hash>`. Keys expire after 2 days. The IP itself is never stored, only a SHA-256 of date + IP. |
 | `FEEDBACK` | KV namespace | Helpful / Wrong votes: `{ at, vote, question, act, section }` |
 
-Vars in `wrangler.toml`: `GLOBAL_DAILY_CAP` (default `300` model calls/day across all visitors) and `SITE_URL`
+Vars in `wrangler.toml`: `GLOBAL_DAILY_CAP` (default `300` questions/day across all visitors, each 3 chat calls + 1 embedding) and `SITE_URL`
 (optional absolute base for canonical/OG URLs; empty = the origin the page was requested on). The HTML keeps those
 URLs relative and the Worker makes them absolute, so no domain is hard-coded.
 
@@ -80,9 +80,19 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
 
 In `worker/index.js`:
 
-- `PROVIDER` — `"cloudflare"` (default) or `"deepseek"`, for the two chat calls. Embeddings always use Workers AI
+- `PROVIDER` — `"cloudflare"` (default, Workers AI) or `"deepseek"` (DeepSeek's own API, unused), for the three chat
+  calls. Embeddings always use Workers AI
   (`EMBED_MODEL`), because the index was built with that model.
-- `MODELS` — the chat model name per provider (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, `deepseek-chat`).
+- `MODEL` — the Workers AI chat model, `@cf/deepseek-ai/deepseek-v4.1-flash-1017`. `FALLBACK_MODEL`
+  (`@cf/deepseek-ai/deepseek-v4-flash-0731`) is tried once when a call to `MODEL` throws an error other than a rate
+  limit. To go back to Llama, set `MODEL` to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+- DeepSeek models are called with `chat_template_kwargs: { thinking: false }`: with thinking on, the reasoning uses up
+  `max_tokens` and the reply comes back empty. Replies are read from `choices[0].message.content` (OpenAI shape), with
+  `response` as a fallback for Llama. `max_tokens` is 200 for the keyword and selection steps and 900 for the answer.
+- **Failed calls.** Empty or null content counts as a failed call. On the Workers AI rate limit (error 3021,
+  "inference request per min rate reached") a call (chat or embedding) is retried once after 1.5 seconds. A call that
+  still fails takes the step's existing fallback: the keyword step falls back to the plain question, the selection
+  step to the first candidates, and the answer step returns 502 `model` without counting the visitor's question.
 - `KEYWORDS_PROMPT`, `SELECT_PROMPT`, `ANSWER_PROMPT` — the three system prompts.
 - `PINS`, `SPEED_PINS`, `EXPRESSWAY_PINS` — sections always added to the candidates for known topics.
 
@@ -122,7 +132,8 @@ Per question:
    The general 50 km/h rule is never a candidate, the model is told not to mention it, and any sentence with 50 km/h
    is dropped from "How it applies" and the bullets.
 
-Each question costs 3 chat-model calls (keywords, selection, answer), 1 embedding, up to 4 Vectorize queries and up
+Each question costs 3 chat-model calls (keywords, selection, answer; more only on a rate-limit retry or the fallback
+model), 1 embedding, up to 4 Vectorize queries and up
 to about 34 KV reads.
 
 The Act name, section, version date and link always come from KV, never from the model. Before an answer is returned:
@@ -204,7 +215,9 @@ node worker/test/e2e.test.mjs   # end-to-end /api/ask with fake AI, Vectorize an
 
 Covers six real questions with their expected sections (lawyer when arrested → Constitution Art. 9; police questions
 → CPC s 22, 23; basic hacking → $5,000 and 2 years under CMA s 3; police search without warrant → CPC s 34;
-expressway speed → fixed sentence only; tenancy → not covered), plus the selection fallback, `topK` and outage paths.
+expressway speed → fixed sentence only; tenancy → not covered), plus the selection fallback, `topK` and outage paths. The fake model replies in the OpenAI shape (one case uses
+Llama's `response`), and further cases check the DeepSeek model ID, `thinking: false`, empty replies, the rate-limit
+retry and the fallback model.
 The fake model picks whatever expected sections it is shown, so the test checks the pipeline, not the real model.
 
 ## Local development

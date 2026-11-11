@@ -20,13 +20,19 @@
 import officialRoutes from "../data/routes.json" with { type: "json" };
 
 // ---------------------------------------------------------------- model config
-// Which backend askModel() uses: "cloudflare" (Workers AI binding) or "deepseek".
+// Which backend askModel() uses: "cloudflare" (Workers AI binding) or "deepseek" (DeepSeek's own API, unused).
 const PROVIDER = "cloudflare";
+// Workers AI chat model, and the one tried once if it fails with an error (not on a rate limit or empty output).
+// To go back to Llama, set MODEL to "@cf/meta/llama-3.3-70b-instruct-fp8-fast": askModel() reads both reply shapes.
+const MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+const FALLBACK_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731";
 // The model name for each provider. Only MODELS[PROVIDER] is used.
 const MODELS = {
-  cloudflare: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  cloudflare: MODEL,
   deepseek: "deepseek-chat",
 };
+// Workers AI rate limit (error 3021, "inference request per min rate reached"): retry once after this delay.
+const RATE_LIMIT_RETRY_MS = 1500;
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // ---------------------------------------------------------------- limits
@@ -224,7 +230,7 @@ async function rewriteQuestion(question, env) {
 }
 
 async function embed(text, env) {
-  const out = await env.AI.run(EMBED_MODEL, { text: [text] });
+  const out = await runAI(env, EMBED_MODEL, { text: [text] });
   const v = out && out.data && out.data[0];
   if (!Array.isArray(v) || v.length !== EMBED_DIMS) throw new Error("embedding failed");
   return v;
@@ -435,6 +441,31 @@ function tokensToLabels(text, used) {
 }
 const stripTokens = (text) => String(text).replace(/\s*\[\[[^\]]*\]\]|\s*⟦[a-z]⟧/g, "");
 
+// ---------------------------------------------------------------- Workers AI calls
+const isRateLimit = (err) => /\b3021\b|rate (limit|reached)|per min rate/i.test(String((err && err.message) || err));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// env.AI.run with one retry after RATE_LIMIT_RETRY_MS on the Workers AI rate limit; any other error is thrown.
+async function runAI(env, model, params) {
+  try {
+    return await env.AI.run(model, params);
+  } catch (err) {
+    if (!isRateLimit(err)) throw err;
+    console.error("Workers AI rate limit, retrying once", err && err.message);
+    await sleep(RATE_LIMIT_RETRY_MS);
+    return env.AI.run(model, params);
+  }
+}
+
+// Reply text in either shape: OpenAI-style choices[0].message.content (DeepSeek), or Workers AI's out.response (Llama).
+function modelText(out) {
+  const content = out && out.choices && out.choices[0] && out.choices[0].message && out.choices[0].message.content;
+  if (typeof content === "string") return content;
+  const r = out && out.response;
+  if (typeof r === "string") return r;
+  return r && typeof r === "object" ? JSON.stringify(r) : "";
+}
+
 // ---------------------------------------------------------------- the one model entry point
 // Sends `prompt` (the user message) with a system prompt (ANSWER_PROMPT unless given) to the configured
 // provider and returns the model's reply text.
@@ -445,9 +476,27 @@ async function askModel(prompt, env, { system = ANSWER_PROMPT, maxTokens = 900 }
   ];
 
   if (PROVIDER === "cloudflare") {
-    const out = await env.AI.run(MODELS.cloudflare, { messages, max_tokens: maxTokens, temperature: 0.1 });
-    const r = out && out.response;
-    return typeof r === "string" ? r : JSON.stringify(r ?? "");
+    const call = (model) => runAI(env, model, {
+      messages,
+      max_tokens: maxTokens,
+      temperature: 0.1,
+      // DeepSeek: thinking must be off, or the reasoning uses up max_tokens and the reply comes back empty.
+      ...(/deepseek/i.test(model) ? { chat_template_kwargs: { thinking: false } } : {}),
+    });
+    let out;
+    try {
+      out = await call(MODELS.cloudflare);
+    } catch (err) {
+      // A rate limit (already retried once) goes straight to the caller's failure path; other errors try the
+      // fallback model once.
+      if (isRateLimit(err) || !FALLBACK_MODEL || FALLBACK_MODEL === MODELS.cloudflare) throw err;
+      console.error(`model ${MODELS.cloudflare} failed, trying ${FALLBACK_MODEL}`, err && err.message);
+      out = await call(FALLBACK_MODEL);
+    }
+    const text = modelText(out);
+    // Empty or null content is a failed call: the caller's existing fallback handles it.
+    if (!text.trim()) throw new Error("empty model output");
+    return text;
   }
 
   if (PROVIDER === "deepseek") {
@@ -469,7 +518,9 @@ async function askModel(prompt, env, { system = ANSWER_PROMPT, maxTokens = 900 }
     });
     if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}`);
     const data = await res.json();
-    return data?.choices?.[0]?.message?.content ?? "";
+    const text = modelText(data);
+    if (!text.trim()) throw new Error("empty model output");
+    return text;
   }
 
   throw new Error(`Unknown PROVIDER ${PROVIDER}`);
@@ -663,7 +714,8 @@ async function handleAsk(request, env) {
   if (visitorUsed >= DAILY_QUESTIONS) {
     return json({ error: "limit", message: `You've used your ${DAILY_QUESTIONS} questions for today. Come back tomorrow (resets at midnight, Singapore time).` }, 429);
   }
-  // Global cap on model calls across all visitors. Counts every model call (it protects the AI budget).
+  // Global cap across all visitors: counts every question that reaches the model (3 chat calls + 1 embedding
+  // each), whether or not it succeeds, since it protects the AI budget.
   if (!(await takeQuota(env.LIMITS, `global:${day}`, globalCap(env)))) {
     return json({ error: "global_limit", message: "LawyerLah has answered all the questions it can for today. Please come back tomorrow (resets at midnight, Singapore time)." }, 429);
   }
