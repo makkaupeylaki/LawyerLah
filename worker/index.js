@@ -57,7 +57,7 @@ const POLICING_RE = /\b(police\w*|arrest\w*|detain\w*|detention|custody|remand\w
 const DRIVING_RE = /\b(speed\w*|km\/?h|driv\w*|expressways?|highways?|roads?|traffic|cars?|motor\w*|vehicles?|lanes?|licen[cs]es?|red light|PIE|AYE|CTE|ECP|BKE|KJE|SLE|TPE|KPE|MCE|NSC)\b/i;
 const SPEED_RE = /\b(speed\w*|km\/?h)\b/i;
 const EXPRESSWAY_RE = /\b(?:[Ee]xpressways?|[Hh]ighways?|PIE|AYE|CTE|ECP|BKE|KJE|SLE|TPE|KPE|MCE|NSC)\b/;
-const ACCUSED_RE = /\b(arrest\w*|accused|detain\w*|detention|custody|remand\w*|charged|interrogat\w*|police statements?|statements? to (the )?police|right to (a )?(lawyer|counsel|legal practitioner|remain silent)|(access|consult\w*) (to |with )?(a )?(lawyer|counsel|legal practitioner)|produced before (a )?magistrate|bail)\b/i;
+const ACCUSED_RE = /\b(arrest\w*|accused|detain\w*|detention|custody|remand\w*|charged|interrogat\w*|police statements?|statements? to (the )?police|right to (a )?(lawyer|counsel|legal practitioner|remain silent)|(access|consult\w*) (to |with )?(a )?(lawyer|counsel|legal practitioner)|produced before (a )?magistrate|bail|police (questions?|questioning|interviews?)|questioned by (the )?police|answer(ing)? (the )?police|(remain|keep|stay) silent|right to silence|self-incriminat\w*)\b/i;
 
 // Fixed text, added by the Worker (not the model) when a speed question mentions an expressway.
 const EXPRESSWAY_NOTE =
@@ -71,20 +71,30 @@ const FURTHER_READING = {
 };
 
 const SOURCE_NOTE = "Unofficial consolidation from SSO, check sso.agc.gov.sg for the official text";
+const SSO_HOME = "https://sso.agc.gov.sg/";
+
+// Section keys are mostly numbers ("63", "88A") but also "Schedules" and "Schedule-First" … "Schedule-Sixth".
+function sectionLabel(section) {
+  const m = /^Schedule-(\w+)$/i.exec(section);
+  if (m) return `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} Schedule`;
+  if (/^Schedules?$/i.test(section)) return "Schedules";
+  return `section ${section}`;
+}
 
 // Names for the codes, used in the keyword prompt when KV "acts:index" can't be read.
 const CODE_NAMES = {
-  pc: "Penal Code", cpc: "Criminal Procedure Code", ea: "Evidence Act", cma: "Computer Misuse Act",
-  rta: "Road Traffic Act", pdpa: "Personal Data Protection Act", poha: "Protection from Harassment Act",
-  isa: "Internal Security Act", mda: "Misuse of Drugs Act", poa: "Public Order Act", vandal: "Vandalism Act",
-  gca: "Gambling Control Act", mla: "Moneylenders Act", pfa: "Police Force Act", arms: "Arms Offences Act",
-  ceswoa: "Corrosive and Explosive Substances and Offensive Weapons Act",
-  cltpa: "Criminal Law (Temporary Provisions) Act", pca: "Prevention of Corruption Act",
+  arms: "Arms Offences Act", ceswoa: "Corrosive and Explosive Substances and Offensive Weapons Act",
   cdsa: "Corruption, Drug Trafficking and Other Serious Crimes (Confiscation of Benefits) Act",
-  cypa: "Children and Young Persons Act", vaa: "Vulnerable Adults Act",
-  mhcta: "Mental Health (Care and Treatment) Act", coroners: "Coroners Act", immig: "Immigration Act",
-  rbda: "Registration of Births and Deaths Act", wc: "Women's Charter", const: "Constitution",
-  rtr: "Road Traffic Rules", rter: "Expressway Traffic Rules", rtsn: "Road Traffic (Restriction of Speed) Notification",
+  cltpa: "Criminal Law (Temporary Provisions) Act", cma: "Computer Misuse Act", const: "Constitution of the Republic of Singapore",
+  coroners: "Coroners Act", cpc: "Criminal Procedure Code", cypa: "Children and Young Persons Act",
+  ea: "Evidence Act 1893", gca: "Gambling Control Act", immig: "Immigration Act", isa: "Internal Security Act",
+  mda: "Misuse of Drugs Act", mhcta: "Mental Health (Care and Treatment) Act", mla: "Moneylenders Act",
+  moa: "Miscellaneous Offences (Public Order and Nuisance) Act 1906", ocha: "Online Criminal Harms Act",
+  pc: "Penal Code", pca: "Prevention of Corruption Act", pdpa: "Personal Data Protection Act", pfa: "Police Force Act",
+  poa: "Public Order Act", poha: "Protection from Harassment Act", psa: "Protection from Scams Act 2025",
+  rbda: "Registration of Births and Deaths Act", rta: "Road Traffic Act", rtr: "Road Traffic Rules",
+  rter: "Road Traffic (Expressway Traffic) Rules", rtsn: "Road Traffic (Restriction of Speed on Roads) Notification",
+  vaa: "Vulnerable Adults Act", vandal: "Vandalism Act", wc: "Women's Charter",
 };
 
 const KEYWORDS_PROMPT = `You turn a person's description of an everyday situation in Singapore into search terms for a database of Singapore Acts.
@@ -129,15 +139,13 @@ const isPlaceholder = (sec) => /PLACEHOLDER/.test(`${sec.text} ${sec.act}`);
 const CACHE_TTL_MS = 60 * 1000;
 let actsCache = null; // { at, promise }
 
-// acts:index may be an array of { code, act | name | title } or an object { code: name | { act } }.
+// acts:index is a JSON array of { code, act, version_in_force_from, sections }.
 function actNamesFrom(data) {
   const names = {};
-  const put = (code, v) => {
-    const name = typeof v === "string" ? v : v && (v.act || v.name || v.title);
-    if (KNOWN_CODES.has(String(code).toLowerCase()) && typeof name === "string") names[String(code).toLowerCase()] = name;
-  };
-  if (Array.isArray(data)) for (const v of data) put(v && (v.code || v.act_code), v);
-  else if (data && typeof data === "object") for (const [k, v] of Object.entries(data)) put(k, v);
+  for (const v of Array.isArray(data) ? data : []) {
+    const code = v && typeof v.code === "string" ? v.code.toLowerCase() : "";
+    if (KNOWN_CODES.has(code) && typeof v.act === "string" && v.act) names[code] = v.act;
+  }
   return names;
 }
 
@@ -231,7 +239,7 @@ async function retrieve(question, rewrite, env) {
         heading: String(r.heading || meta.heading || ""),
         text: text.length > SECTION_CHARS ? `${text.slice(0, SECTION_CHARS)} [section cut for length]` : text,
         inForceFrom: r.version_in_force_from ? String(r.version_in_force_from) : null,
-        source: typeof r.source === "string" && /^https:\/\/sso\.agc\.gov\.sg\//.test(r.source) ? r.source : null,
+        label: sectionLabel(String(r.section ?? meta.section ?? "")),
       };
     })
     .filter(Boolean);
@@ -290,15 +298,16 @@ function quantities(text) {
 }
 
 // Allowed number+unit pairs come only from the verbatim text of the sections given to the model (not the Act
-// name, section number or heading). The Act year never passes as a quantity. Speed tables often list a bare
-// number, so "N km/h" also passes when N appears in a section that talks about km/h.
+// name, section number or heading). The Act year never passes as a quantity. Speed tables (e.g. the rtsn
+// Schedules) often list a bare number, so "N km/h" also passes when N appears in a traffic-Act section or in a
+// section that talks about km/h.
 function numberGuard(sections, extraValues = []) {
   const pairs = new Set();
   const speedNumbers = new Set();
   for (const s of sections) {
     const qs = quantities(s.text);
     for (const q of qs) pairs.add(`${q.value}|${q.unit}`);
-    if (/km\/h/.test(normaliseUnits(s.text))) for (const q of qs) speedNumbers.add(q.value);
+    if (DRIVING_CODES.includes(s.code) || /km\/h/.test(normaliseUnits(s.text))) for (const q of qs) speedNumbers.add(q.value);
   }
   const actYears = new Set(sections.flatMap((s) => String(s.act).match(/\b(1[89]|20)\d{2}\b/g) || []));
   const extras = new Set(extraValues);
@@ -464,6 +473,7 @@ function stripRefs(s, entries = []) {
     .replace(/\b(?:the|this)\s+Act\b/gi, "the law")
     .replace(/\b(?:the\s+)?(?:Singapore\s+)?Constitution(?:\s+of\s+the\s+Republic\s+of\s+Singapore)?\b/g, "the law")
     .replace(/\b(this|that|the)\s+(?:sub-?)?section\b/gi, "$1 rule")
+    .replace(/\b(?:[Tt]he\s+)?(?:(?:First|Second|Third|Fourth|Fifth|Sixth|Seventh|Eighth|Ninth|Tenth)\s+)?Schedules?(?:-\w+)?\b(?:\s+to\s+the\s+law)?/g, "the schedule")
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/([,;:])\s*([.!?])/g, "$2")
     .replace(/\s{2,}/g, " ")
@@ -484,7 +494,7 @@ function parseModel(text) {
 const NOT_COVERED = {
   notCovered: true,
   shortAnswer:
-    "Not covered. LawyerLah couldn't find a section in the Acts it has that answers this.",
+    "Not covered. LawyerLah couldn't find a section in the Acts it has that answers this. It covers policing and criminal procedure, traffic and road rules, family law (Women's Charter), harassment, computer misuse, personal data, drugs and public order.",
   figuresNote: null,
   howItApplies: "",
   depends: [
@@ -508,14 +518,11 @@ function tidy(text, sections) {
     .replace(/(^|[.!?]\s+)([a-z])/g, (m, a, b) => a + b.toUpperCase());
 }
 
-// Official routes: traffic Acts get the traffic routes; anything else gets the general Pro Bono SG route.
+// Official routes: answers from the traffic Acts get the traffic routes; every answer gets the general routes.
 const TRAFFIC_CODES = new Set(DRIVING_CODES);
 function routesFor(sections) {
-  const all = Object.values(officialRoutes.topics).flat();
-  const general = all.filter((r, i) => r.name.startsWith("Pro Bono SG") && all.findIndex((x) => x.name === r.name) === i);
-  const routes = sections.some((s) => TRAFFIC_CODES.has(s.code)) ? [...(officialRoutes.topics.traffic || [])] : [];
-  for (const r of general) if (!routes.some((x) => x.name === r.name)) routes.push(r);
-  return routes;
+  const traffic = sections.some((s) => TRAFFIC_CODES.has(s.code)) ? officialRoutes.topics.traffic || [] : [];
+  return [...traffic, ...(officialRoutes.topics.general || [])];
 }
 
 // ---------------------------------------------------------------- routes
@@ -609,7 +616,9 @@ async function handleAsk(request, env) {
       section: s.section,
       heading: s.heading,
       inForceFrom: s.inForceFrom,
-      sourceUrl: demo ? null : s.source,
+      label: s.label,
+      // The record's "source" is plain text, not a link, so the footnote links to SSO itself, not to a section.
+      sourceUrl: demo ? null : SSO_HOME,
       note: SOURCE_NOTE,
     })),
     furtherReading: ACCUSED_RE.test(topic) ? FURTHER_READING : null,

@@ -4,7 +4,8 @@
 
 A person describes an everyday situation in Singapore and gets a plain-English answer drawn from the actual text of
 Singapore Acts: the real rule and its numbers first, how it applies, what depends on the facts, and the Act and section
-as a small footnote. It never says whether something is legal or illegal and never gives a verdict or
+as a small footnote. It covers policing and criminal procedure, traffic and road rules, family law (Women's Charter),
+harassment, computer misuse, personal data, drugs and public order; it does not cover tenancy or employment. It never says whether something is legal or illegal and never gives a verdict or
 advice. Every answer carries: "Not legal advice. For general understanding only. Ask a lawyer for your situation."
 
 One Cloudflare Worker serves both the static site and the API, so they share an origin:
@@ -25,7 +26,7 @@ browser ──► GET  /, /about, /style.css …  ──► worker/index.js ─�
 | `worker/index.js` | The API (retrieval + answer), plus serving `web/` as static assets. All chat-model calls go through `askModel(prompt, env, options)`. |
 | `worker/wrangler.toml` | Worker config, bindings and vars. |
 | `web/_headers`, `web/robots.txt` | Keep the site out of search engines (see [Privacy](#privacy)). |
-| `data/routes.json` | Official routes per topic (MOM, TADM, ECT, HDB, Small Claims Tribunals, Pro Bono SG, police) with eligibility, limits and links. Fixed text, never generated. |
+| `data/routes.json` | Official routes (Traffic Police e-services for traffic answers, Pro Bono SG for every answer) with eligibility, limits and links. Fixed text, never generated. |
 
 ## Bindings needed
 
@@ -52,18 +53,19 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
   - `shortAnswer`: 2–4 sentences stating the rule with its real numbers first, no section numbers or Act names.
     `howItApplies`: 1–2 neutral sentences on which part of the rule matches. `depends`: up to 5 facts that would
     change the answer.
-  - `sources`: up to 3 `{ act, section, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
-    Act, section, "version in force from …" and `note` = "Unofficial consolidation from SSO, check sso.agc.gov.sg for
-    the official text". `sourceUrl` is the record's `source` if it is an sso.agc.gov.sg link, otherwise the footnote
-    links to the SSO home page.
+  - `sources`: up to 3 `{ act, section, label, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
+    Act, `label` ("section 63", or "First Schedule" / "Schedules" for the non-numeric keys), "version in force from …"
+    and `note` = "Unofficial consolidation from SSO, check sso.agc.gov.sg for the official text". `sourceUrl` is always
+    `https://sso.agc.gov.sg/` (the records' `source` field is plain text, not a link), so the footnote links to SSO,
+    not to the section.
   - `figuresNote`: "The exact figures are not in the text I have. Check the source below." when the short answer
     had a sentence dropped by the number check, or fell back to naming the rules found; otherwise `null`.
   - `furtherReading`: for questions about the rights of an accused or arrested person, a link to a third-party law
     firm article (Regent Law, on the Criminal Procedure Code), labelled as such. Link only; its text is never copied.
     Otherwise `null`.
   - `demo` / `demoNotice`: only if a section's text says PLACEHOLDER (none of the loaded Acts should).
-  - `routes`: `[{ name, what, eligibility, limits, url }]` from `data/routes.json`. Traffic Acts (rta, rtr, rter, rtsn)
-    get the traffic routes; every answer gets the general Pro Bono SG route.
+  - `routes`: `[{ name, what, eligibility, limits, url }]` from `data/routes.json`. Answers from the traffic Acts (rta,
+    rtr, rter, rtsn) get `topics.traffic`; every answer gets `topics.general` (Pro Bono SG).
   - Not covered → `notCovered: true`, `sources` and `routes` are empty, and `shortAnswer` starts with "Not covered".
   - Errors are `{ error, message }`: 400 `empty` / `too_long` (over 500 chars) / `rejected` (abusive words or prompt
     injection) / `bad_request`, 429 `limit` (visitor's 10/day) or `global_limit` (overall cap), 502 `model` (the
@@ -87,7 +89,7 @@ Per question:
 
 1. **Keywords.** The model rewrites the question into 3–6 legal keywords as an Act would word them (e.g. "arrested
    person", "consult legal practitioner", "produced before Magistrate") and guesses up to 4 Act codes. Act names for
-   the prompt come from KV `acts:index` (cached 60 s), with built-in names as a fallback. If this step fails, the
+   the prompt come from KV `acts:index` (cached 60 s), with `CODE_NAMES` as a fallback. If this step fails, the
    plain question is used.
 2. **Search.** The question plus keywords is embedded with `@cf/baai/bge-base-en-v1.5` and Vectorize is queried
    (`topK` 12, `returnMetadata: "all"`). Extra filtered queries on `code` run for policing questions
@@ -127,7 +129,8 @@ The Act name, section, version date and link always come from KV, never from the
 The "Official routes that may apply" part of an answer comes only from `data/routes.json`, never from the model. It
 describes each route and its conditions; it must never say what the user should do, never say anyone is entitled or
 in breach, and never give odds. Keep that wording when editing the file, and re-check limits against the linked
-official pages (last checked November 2026).
+official pages (last checked November 2026). There are no routes specific to criminal matters yet: none could be
+cited from verified facts, so criminal answers show only Pro Bono SG. Add one only from a checked official source.
 
 ## Law data
 
@@ -135,11 +138,16 @@ The law text is already loaded into Vectorize (`lawyerlah-laws`) and KV `LAWS`; 
 writes. Laws are updated by reloading those, not by redeploying.
 
 - Vector metadata: `code`, `act`, `section`, `heading`, `part`, `kv_key` (several vector parts can map to one section).
-- KV `law:{code}:{section}` → `{ act, act_code, section, heading, text, version_in_force_from, source }`; also
-  `act:{code}` and `acts:index`. Repealed sections can have an empty heading.
-- Codes: pc cpc ea cma rta pdpa poha moa isa mda poa ocha vandal gca mla pfa arms ceswoa cltpa cdsa pca psa cypa vaa
-  mhcta coroners immig rbda wc const, plus rtr (Road Traffic Rules), rter (Expressway Traffic Rules) and rtsn (Road
-  Traffic (Restriction of Speed) Notification).
+- KV `law:{code}:{section}` → `{ act, act_code, section, heading, text, version_in_force_from, parts, source }`.
+  `source` is plain text (the same on every record), not a URL. Section keys are mostly numbers, but there are also
+  `law:{code}:Schedules` and `law:rtsn:Schedule-First` … `Schedule-Sixth`. Repealed sections can have an empty heading.
+- KV `act:{code}` → `{ act, code, version_in_force_from, sections: [{ section, heading }] }`.
+- KV `acts:index` → JSON array of `{ code, act, version_in_force_from, sections }` (33 entries). The keyword step
+  reads Act names from it; `CODE_NAMES` in `worker/index.js` is the fallback.
+- Codes: arms cdsa ceswoa cltpa cma const coroners cpc cypa ea gca immig isa mda mhcta mla moa ocha pc pca pdpa pfa poa
+  poha psa rbda rta rter rtr rtsn vaa vandal wc. Among them: ea = Evidence Act 1893, moa = Miscellaneous Offences
+  (Public Order and Nuisance) Act 1906, psa = Protection from Scams Act 2025, rtr = Road Traffic Rules, rter = Road
+  Traffic (Expressway Traffic) Rules, rtsn = Road Traffic (Restriction of Speed on Roads) Notification.
 
 The text is an unofficial consolidation from SSO; every answer says so and points to sso.agc.gov.sg for the official
 text. SSO only allows automated extraction between 3am and 7am Singapore time, so any reload job has to run in that

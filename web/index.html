@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>lawyerlah · Your kaki for Singapore law basics</title>
-  <meta name="description" content="Describe an everyday situation in Singapore (tenancy, employment, traffic) and see which Act and section seems relevant, in plain English. Not legal advice.">
+  <meta name="description" content="Describe an everyday situation in Singapore and see what the Acts say, in plain English: policing and criminal procedure, traffic and road rules, family law (Women's Charter), harassment, computer misuse, personal data, drugs and public order. Not legal advice.">
   <meta name="theme-color" content="#0b0c0e">
   <meta name="color-scheme" content="dark">
   <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
@@ -46,16 +46,16 @@
 
     <form id="ask" class="ask" novalidate>
       <label for="q" class="ask-label">Describe your situation</label>
-      <textarea id="q" name="question" rows="4" maxlength="500" placeholder="e.g. My landlord wants me to pay for repainting the whole flat when I move out" required></textarea>
+      <textarea id="q" name="question" rows="4" maxlength="500" placeholder="e.g. The police stopped me on the street and want to search my bag" required></textarea>
       <div class="ask-row">
         <span id="count" class="count" aria-live="polite">0 / 500</span>
         <button id="submit" class="btn btn-primary" type="submit">Ask</button>
       </div>
       <p id="ask-error" class="field-error" role="alert" hidden></p>
       <div class="chips" aria-label="Examples">
-        <button type="button" class="chip">My landlord is keeping my whole deposit for small marks on the wall</button>
-        <button type="button" class="chip">My boss makes me work overtime every day without extra pay</button>
-        <button type="button" class="chip">I was caught driving 20 km/h over the speed limit</button>
+        <button type="button" class="chip">Can police search me without a warrant?</button>
+        <button type="button" class="chip">What is the speed limit on an expressway?</button>
+        <button type="button" class="chip">Do I have to answer police questions?</button>
       </div>
     </form>
 
@@ -115,31 +115,77 @@
       <ul class="topic-list">
         <li>
           <details>
-            <summary><span class="topic-name">Tenancy</span><span class="topic-sub">Renting a room or flat, deposits, rent, ending a lease</span></summary>
+            <summary><span class="topic-name">Policing and criminal procedure</span><span class="topic-sub">Arrest, searches, police questioning, bail, seeing a lawyer</span></summary>
             <div class="topic-qs">
-              <button type="button" class="chip">My landlord wants to end my lease early because I paid rent late</button>
-              <button type="button" class="chip">I owe two months of rent and my landlord says he will take my things</button>
-              <button type="button" class="chip">My landlord won't return my deposit after I moved out</button>
+              <button type="button" class="chip">What happens after someone is arrested?</button>
+              <button type="button" class="chip">Can I see a lawyer after being arrested?</button>
+              <button type="button" class="chip">How long can police hold someone before they see a Magistrate?</button>
             </div>
           </details>
         </li>
         <li>
           <details>
-            <summary><span class="topic-name">Employment</span><span class="topic-sub">Notice, working hours, overtime, leave</span></summary>
+            <summary><span class="topic-name">Traffic and road rules</span><span class="topic-sub">Speed limits, careless driving, drink driving, road rules</span></summary>
             <div class="topic-qs">
-              <button type="button" class="chip">How much notice do I give if I want to resign?</button>
-              <button type="button" class="chip">My boss makes me work 12 hours a day</button>
-              <button type="button" class="chip">How many days of annual leave do I get after two years?</button>
+              <button type="button" class="chip">What is the speed limit on normal roads?</button>
+              <button type="button" class="chip">What happens if someone drives after drinking?</button>
+              <button type="button" class="chip">Can I use my phone while driving?</button>
             </div>
           </details>
         </li>
         <li>
           <details>
-            <summary><span class="topic-name">Traffic</span><span class="topic-sub">Speeding, careless driving, drink driving</span></summary>
+            <summary><span class="topic-name">Family law (Women's Charter)</span><span class="topic-sub">Marriage, divorce, maintenance, family violence</span></summary>
             <div class="topic-qs">
-              <button type="button" class="chip">I was caught speeding on the expressway</button>
-              <button type="button" class="chip">I changed lanes without signalling and a car hit me</button>
-              <button type="button" class="chip">I had two beers at dinner and drove home</button>
+              <button type="button" class="chip">How does a divorce start?</button>
+              <button type="button" class="chip">Can a spouse be asked to pay maintenance?</button>
+              <button type="button" class="chip">How do I get a protection order against a family member?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Harassment</span><span class="topic-sub">Threats, stalking, false statements, online abuse</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">Someone keeps sending me threatening messages</button>
+              <button type="button" class="chip">Can I stop someone posting false things about me online?</button>
+              <button type="button" class="chip">What counts as stalking?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Computer misuse</span><span class="topic-sub">Hacking, logging into accounts, misuse of passwords</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">Someone logged into my account without permission</button>
+              <button type="button" class="chip">Is sharing someone else's password an offence?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Personal data</span><span class="topic-sub">How organisations collect, use and protect your data</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">A company leaked my personal data</button>
+              <button type="button" class="chip">Can a company use my data for marketing without asking?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Drugs</span><span class="topic-sub">Possession, consumption, trafficking</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">What happens if drugs are found in my bag?</button>
+              <button type="button" class="chip">What does trafficking mean for drugs?</button>
+            </div>
+          </details>
+        </li>
+        <li>
+          <details>
+            <summary><span class="topic-name">Public order</span><span class="topic-sub">Protests, public assemblies, nuisance in public places</span></summary>
+            <div class="topic-qs">
+              <button type="button" class="chip">Do I need a permit to hold a protest?</button>
+              <button type="button" class="chip">What happens if someone is drunk and noisy in public?</button>
             </div>
           </details>
         </li>
