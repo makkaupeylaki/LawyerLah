@@ -21,6 +21,7 @@ put("cpc", "258", "Admissibility of accused's statements", "Where any person is 
 put("cpc", "261", "Inferences from accused's silence", "Where in any criminal proceedings evidence is given that the accused, on being charged, failed to mention any fact, the court may draw such inferences as appear proper.");
 put("cpc", "32", "Search by police officer", "A police officer may search any place where he has reason to believe that a thing necessary for an investigation may be found.");
 put("cpc", "34", "Search without warrant for arrestable offences", "(1) A police officer investigating an arrestable offence may, without a warrant, search any place where he has reason to believe that a thing necessary for the investigation may be found ...");
+put("cpc", "78", "Search of arrested persons", "(1) Whenever a person is arrested by a police officer under a warrant which does not provide for the taking of bail, or without a warrant, and the person arrested cannot legally be admitted to bail or is unable to furnish bail, the officer may search that person and place in safe custody all articles, other than necessary wearing apparel, found upon him. (1A) Where a person is arrested and released on bail, a police officer may search that person only for a thing that may be used as evidence of the offence or for a weapon.");
 put("cpc", "92", "Bailable offences", "When any person accused of a bailable offence is arrested ... he shall be released on bail.");
 put("cma", "3", "Unauthorised access to computer material", "(1) Any person who knowingly causes a computer to perform any function for the purpose of securing access without authority to any program or data held in any computer shall be guilty of an offence and shall be liable on conviction to a fine not exceeding $5,000 or to imprisonment for a term not exceeding 2 years or to both and, in the case of a second or subsequent conviction, to a fine not exceeding $10,000 or to imprisonment for a term not exceeding 3 years or to both.");
 put("cma", "4", "Access with intent to commit or facilitate commission of offence", "(1) Any person who causes a computer to perform any function for the purpose of securing access to any program or data held in any computer with intent to commit an offence ... shall be liable on conviction to a fine not exceeding $50,000 or to imprisonment for a term not exceeding 10 years or to both.");
@@ -36,7 +37,7 @@ L["acts:index"] = JSON.stringify(Object.entries(ACTS).map(([code, act]) => ({ co
 // Noisy vector results: the expected sections are NOT in the unfiltered results, so they must come from pinning.
 const hit = (key, score) => ({ id: key + ":p1", score, metadata: { kv_key: key, code: key.split(":")[1], section: key.split(":")[2], heading: "", part: 1 } });
 const VECTORIZE = { calls: [], query: async (v, o) => { VECTORIZE.calls.push({ topK: o.topK, filter: o.filter ? o.filter.code.$in.join(",") : null });
-  return { matches: [hit("law:wc:64E", 0.82), hit("law:pc:1", 0.8), hit("law:rtsn:2", 0.7), hit("law:cpc:92", 0.5)] }; } };
+  return { matches: [hit("law:wc:64E", 0.82), hit("law:pc:1", 0.8), hit("law:rtsn:2", 0.7), hit("law:cpc:92", 0.5), ...(VECTORIZE.extra || []).map((k) => hit(k, 0.75))] }; } };
 
 // Workers AI chat replies in the OpenAI shape (DeepSeek); t.shape = "llama" returns the old { response } shape.
 const openai = (content) => ({ id: "chatcmpl-test", object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }], usage: {} });
@@ -71,7 +72,7 @@ function makeAI(t) {
   return ai;
 }
 async function run(t) {
-  const w = await load(); VECTORIZE.calls = [];
+  const w = await load(); VECTORIZE.calls = []; VECTORIZE.extra = t.extraHits || [];
   const AI = makeAI(t); const LAWS = kv(L);
   const env = { AI, VECTORIZE, LAWS, LIMITS: kv(), FEEDBACK: kv() };
   const r = await w.fetch(new Request("https://x/api/ask", { method: "POST", headers: { "cf-connecting-ip": Math.random() + "" }, body: JSON.stringify({ question: t.q }) }), env);
@@ -230,6 +231,55 @@ const fresh = (extra) => ({ ...JSON.parse(JSON.stringify(POLICE)), ...extra });
   const chats = r.AI.runs.filter((x) => x.step !== "embed");
   expect("each step tries v4-flash-0731 after the primary fails", chats.filter((x) => x.model === "@cf/deepseek-ai/deepseek-v4-flash-0731").length === 3, chats.map((x) => x.model.split("/").pop()).join(", "));
   expect("still answered", r.status === 200 && /arrestable/.test(r.a.shortAnswer));
+}
+// ---------------------------------------------------------------- conditions (live failure: CPC s78 over-generalised)
+const SEARCH = (answer) => ({ q: "Can police search me without a warrant?", kw: { keywords: ["search without warrant", "search of arrested persons"], codes: ["cpc"] },
+  ideal: ["law:cpc:34", "law:cpc:78"], extraHits: ["law:cpc:78"], answer });
+{
+  console.log("15. Police search without a warrant: conditions stated, not generalised");
+  const { a, AI, status } = await run(SEARCH({ ids: ["law:cpc:34", "law:cpc:78"],
+    powers: [{ provision: "34(1)", power: "search a place without a warrant", conditions: "investigating an arrestable offence and reason to believe a thing needed is there" },
+             { provision: "78(1)", power: "search an arrested person and keep articles", conditions: "arrested and cannot be admitted to or furnish bail; not necessary clothing" },
+             { provision: "78(1A)", power: "search a person released on bail", conditions: "only for evidence of the offence or a weapon" }],
+    shortAnswer: "A police officer investigating an arrestable offence may search a place without a warrant only if they have reason to believe something needed for the investigation is there [[law:cpc:34]]. If a person is arrested and cannot be released on bail or cannot furnish bail, an officer may search them and keep in safe custody the articles found on them, other than necessary clothing [[law:cpc:78]]. If the person is released on bail, the officer may search them only for evidence of the offence or for a weapon [[law:cpc:78]].",
+    howItApplies: "The rule on searches without a warrant covers a police search during an investigation into an arrestable offence.",
+    depends: ["Whether the offence being investigated is arrestable.", "Whether the person was arrested and released on bail."] }));
+  expect("status 200", status === 200, JSON.stringify(a).slice(0, 200));
+  expect("s34 described as applying to an arrestable offence", /arrestable offence/.test(a.shortAnswer), a.shortAnswer);
+  expect("s34's conditions stated (only if ... reason to believe)", /only if they have reason to believe/.test(a.shortAnswer));
+  expect("s78(1) and s78(1A) kept apart, each with its condition", /cannot be released on bail/.test(a.shortAnswer) && /released on bail, the officer may search them only for evidence/.test(a.shortAnswer));
+  expect("never says any arrested person's belongings are all kept without condition", !/any (arrested )?person/i.test(a.shortAnswer) && !/keep (in safe custody )?all/i.test(a.shortAnswer));
+  expect("no vague 'in the stated situations' wording", !/stated situations|certain cases|under conditions/i.test(a.shortAnswer + a.howItApplies));
+  expect("sources are s34 then s78", src(a) === "Criminal section 34, Criminal section 78", src(a));
+  expect("'powers' worksheet not shown to the user", !("powers" in a));
+}
+{
+  console.log("16. Live bad answer replayed: over-broad and vague sentences dropped");
+  const { a } = await run(SEARCH({ ids: ["law:cpc:78", "law:cpc:34"],
+    shortAnswer: "Police may search any arrested person and keep all articles found on them [[law:cpc:78]]. Police can also search without a warrant in the stated situations [[law:cpc:34]].",
+    howItApplies: "In certain cases, police may search a place without a warrant.", depends: ["Whether a warrant was issued."] }));
+  expect("'any arrested person ... all articles' dropped", !/any arrested person|all articles/i.test(a.shortAnswer), a.shortAnswer);
+  expect("'in the stated situations' dropped", !/stated situations/i.test(a.shortAnswer));
+  expect("vague 'In certain cases' how-it-applies replaced by the neutral default", !/certain cases/i.test(a.howItApplies), a.howItApplies);
+  expect("falls back to naming the rules found, with the figures note", /most relevant rules found/.test(a.shortAnswer) && !!a.figuresNote);
+}
+{
+  console.log("17. Mixed answer: the conditioned sentence kept, the over-broad one dropped");
+  const { a } = await run(SEARCH({ ids: ["law:cpc:34", "law:cpc:78"],
+    shortAnswer: "A police officer investigating an arrestable offence may search a place without a warrant only if they have reason to believe something needed for the investigation is there [[law:cpc:34]]. Police may also search any arrested person and keep all articles [[law:cpc:78]].",
+    howItApplies: "The rule on searches without a warrant covers this.", depends: [] }));
+  expect("conditioned s34 sentence kept", /only if they have reason to believe/.test(a.shortAnswer), a.shortAnswer);
+  expect("over-broad s78 sentence dropped", !/any arrested person/i.test(a.shortAnswer));
+}
+{
+  console.log("18. Answer prompt carries the new rules");
+  const { AI } = await run(SEARCH({ ids: ["law:cpc:34"], shortAnswer: "x.", depends: [] }));
+  const sys = AI.runs.filter((r) => r.step === "answer")[0].params.messages[0].content;
+  expect("conditions and limits rule", /state its conditions and limits in plain words/.test(sys));
+  expect("sub-provision rule (1) versus (1A)", /subsection \(1\) versus \(1A\)/.test(sys));
+  expect("vague-phrase rule", /in the stated situations/.test(sys) && /Either say what the conditions are, or leave the sentence out/.test(sys));
+  expect("self-check before replying", /check every sentence of "shortAnswer" and "howItApplies" against the section text/.test(sys));
+  expect("'powers' worksheet in the reply shape", /"powers": \[/.test(sys));
 }
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 if (fails) process.exitCode = 1;

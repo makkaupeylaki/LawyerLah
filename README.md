@@ -50,7 +50,7 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
 
 - `POST /api/ask` `{ "question": "..." }` →
   `{ notCovered, shortAnswer, figuresNote, howItApplies, depends[], sources[], furtherReading, demo, demoNotice, routes }`.
-  - `shortAnswer`: 2–4 sentences stating the rule with its real numbers first, no section numbers or Act names.
+  - `shortAnswer`: 2–5 sentences stating the rule, its conditions and its real numbers first, no section numbers or Act names.
     `howItApplies`: 1–2 neutral sentences on which part of the rule matches. `depends`: up to 5 facts that would
     change the answer.
   - `sources`: up to 6 `{ act, section, label, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
@@ -127,6 +127,13 @@ Per question:
    model. It answers only from them, describes the basic or main provision first, never merges penalties of different
    offences, and tags each figure with the section it comes from. Where the sections don't directly cover the
    question, it says "The text provided does not state this."
+   - **Conditions.** A power or right is stated with its conditions and limits in plain words ("only if X, Y or Z"),
+     never wider than the section says. Where a sub-provision gives a narrower or different power (e.g. s 78(1) vs
+     s 78(1A)), the answer says which applies when instead of blending them. Vague phrases ("in the stated
+     situations", "in certain cases", "under conditions") are not allowed: say the conditions or leave the sentence out.
+   - **Self-check.** The model first fills a `powers` worksheet (provision, power, conditions as the text states them),
+     writes the answer from it, and checks each sentence against the section text before replying. The worksheet is
+     not shown to the user.
 6. **Expressway speed.** When the question names an expressway and is about speed, the short answer is only the fixed
    text: limits vary by stretch (commonly 80 to 90 km/h), only some stretches are listed at 90 km/h, check the signs.
    The general 50 km/h rule is never a candidate, the model is told not to mention it, and any sentence with 50 km/h
@@ -156,6 +163,11 @@ The Act name, section, version date and link always come from KV, never from the
 - **Wording filter.** Any sentence that says legal/illegal/lawful/unlawful (statutory terms like "legal practitioner"
   and "legal aid" are allowed), entitled, breach, guilty, liable, gives odds, or gives advice ("you should",
   "I recommend") is dropped.
+- **Conditions filter.** Any sentence with a vague condition phrase ("in the stated situations", "in certain cases",
+  "under/subject to conditions", …) is dropped, and so is any sentence that gives a power ("may", "can", "has the
+  power") to "any"/"all"/"everyone"/"at any time" with no condition word at all ("if", "only", "when", "where",
+  "unless", "other than", "who", …). This catches the worst over-generalisations; it can't tell whether the stated
+  conditions are the right ones, which depends on the model.
 - **Fallback.** If nothing usable is left, the short answer names the rules found (section headings) and says the text
   provided does not state this in a form LawyerLah could check, with `figuresNote`.
 
