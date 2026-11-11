@@ -5,7 +5,8 @@
 A person describes an everyday situation in Singapore and gets a plain-English answer drawn from the actual text of
 Singapore Acts: the real rule and its numbers first, how it applies, what depends on the facts, and the Act and section
 as a small footnote. It covers policing and criminal procedure, traffic and road rules, family law (Women's Charter),
-harassment, computer misuse, personal data, drugs and public order; it does not cover tenancy or employment. It never says whether something is legal or illegal and never gives a verdict or
+harassment, computer misuse, personal data, drugs, public order, and poisons and dangerous substances; it does not
+cover tenancy or employment. It never says whether something is legal or illegal and never gives a verdict or
 advice. Every answer carries: "Not legal advice. For general understanding only. Ask a lawyer for your situation."
 
 One Cloudflare Worker serves both the static site and the API, so they share an origin:
@@ -50,16 +51,18 @@ in the repo. For local dev put it in `worker/.dev.vars` (git-ignored).
 
 - `POST /api/ask` `{ "question": "..." }` →
   `{ notCovered, shortAnswer, figuresNote, howItApplies, depends[], sources[], furtherReading, demo, demoNotice, routes }`.
-  - `shortAnswer`: 2–5 sentences stating the rule, its conditions and its real numbers first, no section numbers or Act names.
-    `howItApplies`: 1–2 neutral sentences on which part of the rule matches. `depends`: up to 5 facts that would
-    change the answer.
+  - Plain language for readers with no law background. `shortAnswer`: at most 2 short sentences and 45 words (the
+    model is asked for about 35), leading with what the person most likely wants to know, with its conditions and
+    real numbers; no Act names. `howItApplies`: at most 2 short neutral sentences on which part of the rule matches.
+    `depends`: at most 3 facts that would change the answer, each at most 12 words.
   - `sources`: up to 6 `{ act, section, label, heading, inForceFrom, sourceUrl, note }`, shown as a small footnote:
-    Act, `label` ("section 63", "Article 9" for the Constitution, or "First Schedule" / "Schedules" for the non-numeric keys), "version in force from …"
+    Act, `label` ("section 63", "Article 9" for the Constitution, "rule 4" for the Poisons Rules, or "First Schedule" / "Schedules" for the non-numeric keys), "version in force from …"
     and `note` = "Unofficial consolidation from SSO, check sso.agc.gov.sg for the official text". `sourceUrl` is always
     `https://sso.agc.gov.sg/` (the records' `source` field is plain text, not a link), so the footnote links to SSO,
     not to the section.
-  - `figuresNote`: "The exact figures are not in the text I have. Check the source below." when the short answer
-    had a sentence dropped by the number check, or fell back to naming the rules found; otherwise `null`.
+  - `figuresNote`: "Some details are left out, check the official source below." whenever any sentence of the short
+    answer was left out (by a filter or the length limit), or it fell back to naming the rules found; otherwise
+    `null`.
   - `furtherReading`: for questions about the rights of an accused or arrested person, a link to a third-party law
     firm article (Regent Law, on the Criminal Procedure Code), labelled as such. Link only; its text is never copied.
     Otherwise `null`.
@@ -119,6 +122,7 @@ Per question:
    | police search, warrant, search without warrant | CPC s 32, 34 |
    | hacking, unauthorised access, computer | CMA s 3 first, then s 4–9 |
    | bail | CPC s 92, 93, 95 |
+   | poisons, selling or possessing poison, poisons licence | Poisons Act s 5, 6, 9, 19 |
    | speed limit (general) | rtsn s 2, rtsn First–Sixth Schedules, RTA s 63 |
    | speed limit on an expressway (expressway named in the question) | rtsn First–Sixth Schedules, RTA s 63; never rtsn s 2 |
 
@@ -129,6 +133,17 @@ Per question:
    model. It answers only from them, describes the basic or main provision first, never merges penalties of different
    offences, and tags each figure with the section it comes from. Where the sections don't directly cover the
    question, it says "The text provided does not state this."
+   - **Plain language.** Everyday words a 12-year-old understands; "jail"/"prison", not "imprisonment"; "arrested",
+     not "apprehended"; a legal term explained in brackets the first time ("arrestable offence (a serious offence
+     where police can arrest without a warrant)"). Penalties in plain words ("up to $5,000 fine or 2 years' jail, or
+     both"), only the tiers that matter to the question.
+   - **Shorter, not less accurate.** Every number and every condition that changes the meaning stays; if a condition
+     doesn't fit, the whole point is left out, never the condition. One power per sentence.
+   - **Special Acts.** A power that applies only to offences under its own Act (CESWOA, Poisons Act, Poisons Rules)
+     is stated with its offence category ("for offences involving corrosive or explosive substances or offensive
+     weapons"), never as a general police power. For searches without a warrant, the condition that makes the
+     warrant unnecessary is stated (e.g. only when the thing is likely to be removed or lost), never "one of the
+     listed grounds".
    - **Conditions.** A power or right is stated with its conditions and limits in plain words ("only if X, Y or Z"),
      never wider than the section says. Where a sub-provision gives a narrower or different power (e.g. s 78(1) vs
      s 78(1A)), the answer says which applies when instead of blending them. Vague phrases ("in the stated
@@ -147,9 +162,15 @@ to about 34 KV reads.
 
 The Act name, section, version date and link always come from KV, never from the model. Before an answer is returned:
 
-- **Section tags.** When the short answer uses more than one section, each figure is tagged with its section and
-  shown as "(section 3)" / "(Article 9)"; with one section, no tag is shown. This is the only place section numbers
-  appear outside the footnote.
+- **Section tags.** When the short answer uses more than one section, each sentence ends with exactly one tag,
+  "(section 3)" / "(Article 9)" / "(rule 4)"; with one section, no tag is shown. A sentence citing two different
+  sections (two powers merged) is dropped. This is the only place section numbers appear outside the footnote.
+- **Special-Act scope.** Before Act names are stripped, "offences under this Act" and the names of the special Acts
+  (CESWOA, Poisons Act, Poisons Rules) are rewritten into their offence category, so the restriction survives. A
+  sentence that cites a special-Act section, or states a power in an answer using one, without naming the category
+  is dropped.
+- **Length.** At most 2 sentences and 45 words in the short answer, whole sentences only; a single sentence over 45
+  words is left out rather than cut.
 - **Number check.** Every number in the short answer (digits, ranges, or spelled out like "seven days") must appear
   with the same unit in the verbatim text of the section it is tagged with (untagged: any of the sections used) ("50 kilometres per hour" counts as
   "50 km/h"). Digits in the Act name, section number or heading don't count, and the Act year never passes as a
@@ -178,8 +199,9 @@ The Act name, section, version date and link always come from KV, never from the
 - **Question first.** The sections used are ordered so the one that answers the question comes first (pinned
   sections for the question's topic, in pin order, e.g. CPC s 78 for a personal search before powers to search
   places), and the short answer's sentences follow that order.
-- **Fallback.** If nothing usable is left, the short answer names the rules found (section headings) and says the text
-  provided does not state this in a form LawyerLah could check, with `figuresNote`.
+- **Fallback.** Sentences that survive the filters are shown, with the line "Some details are left out, check the
+  official source below." whenever any were left out. If none survive, the short answer names the rules found (at
+  most 2 section headings), with the same line.
 
 ## Official routes
 
@@ -195,16 +217,20 @@ The law text is already loaded into Vectorize (`lawyerlah-laws`) and KV `LAWS`; 
 writes. Laws are updated by reloading those, not by redeploying.
 
 - Vector metadata: `code`, `act`, `section`, `heading`, `part`, `kv_key` (several vector parts can map to one section).
-- KV `law:{code}:{section}` → `{ act, act_code, section, heading, text, version_in_force_from, parts, source }`.
-  `source` is plain text (the same on every record), not a URL. Section keys are mostly numbers, but there are also
-  `law:{code}:Schedules` and `law:rtsn:Schedule-First` … `Schedule-Sixth`. Repealed sections can have an empty heading.
+- KV `law:{code}:{section}` → `{ act, act_code, section, heading, text, version_in_force_from, parts, source }` (the
+  Poisons instruments also have `edition`). `source` is plain text (the same on every record), not a URL. Section
+  keys are mostly numbers, but there are also `law:{code}:Schedules`, `law:rtsn:Schedule-First` … `Schedule-Sixth`,
+  `law:psnr:{rule}` and `law:psnr:Schedule-First` … `Schedule-Thirteenth`. Repealed sections can have an empty heading.
 - KV `act:{code}` → `{ act, code, version_in_force_from, sections: [{ section, heading }] }`.
-- KV `acts:index` → JSON array of `{ code, act, version_in_force_from, sections }` (33 entries). The keyword step
+- KV `acts:index` → JSON array of `{ code, act, version_in_force_from, sections }` (37 entries). The keyword step
   reads Act names from it; `CODE_NAMES` in `worker/index.js` is the fallback.
 - Codes: arms cdsa ceswoa cltpa cma const coroners cpc cypa ea gca immig isa mda mhcta mla moa ocha pc pca pdpa pfa poa
-  poha psa rbda rta rter rtr rtsn vaa vandal wc. Among them: ea = Evidence Act 1893, moa = Miscellaneous Offences
-  (Public Order and Nuisance) Act 1906, psa = Protection from Scams Act 2025, rtr = Road Traffic Rules, rter = Road
-  Traffic (Expressway Traffic) Rules, rtsn = Road Traffic (Restriction of Speed on Roads) Notification.
+  poha psa psn psnr psnsanc psnvet rbda rta rter rtr rtsn vaa vandal wc. Among them: ea = Evidence Act 1893, moa =
+  Miscellaneous Offences (Public Order and Nuisance) Act 1906, psa = Protection from Scams Act 2025, rtr = Road
+  Traffic Rules, rter = Road Traffic (Expressway Traffic) Rules, rtsn = Road Traffic (Restriction of Speed on Roads)
+  Notification, psn = Poisons Act 1938, psnr = Poisons Rules (Cap 234, R 1), psnvet = Approved Qualifications for
+  Veterinary Surgeons (Consolidation) Notification (Cap 234, N 2), psnsanc = Authority to Grant Sanctions to
+  Prosecute (Cap 234, N 1). Poisons questions also run a filtered query on psn, psnr, psnvet, psnsanc.
 
 The text is an unofficial consolidation from SSO; every answer says so and points to sso.agc.gov.sg for the official
 text. SSO only allows automated extraction between 3am and 7am Singapore time, so any reload job has to run in that
@@ -239,7 +265,9 @@ Covers six real questions with their expected sections (lawyer when arrested →
 → CPC s 22, 23; basic hacking → $5,000 and 2 years under CMA s 3; police search without warrant → CPC s 34;
 expressway speed → fixed sentence only; tenancy → not covered), plus the selection fallback, `topK` and outage paths. The fake model replies in the OpenAI shape (one case uses
 Llama's `response`), and further cases check the DeepSeek model ID, `thinking: false`, empty replies, the rate-limit
-retry and the fallback model.
+retry and the fallback model. It also checks that every short answer the Worker returns is at most 2 sentences and
+45 words; CPC s 78 (real text, in force 15/9/2026) answered with (1), (1A) and (2) kept apart; special-Act scope
+(CESWOA s 9) and the Poisons codes. Other law fixtures are stand-ins (shape only) and are labelled as such.
 The fake model picks whatever expected sections it is shown, so the test checks the pipeline, not the real model.
 
 ## Local development
